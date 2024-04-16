@@ -1,10 +1,23 @@
-# Xiaohao
+# Xiaohao: Embodied Intelligence Project
+
 ## Project Overview
-This is the embodied intelligence of Shenhao's humanoid Xiaohao. The intelligence of Xiaohao is a multi-agent systems; including a large language model, a vision language model, robotic arms, feet(wheels) and camera. The large language model, together with vision language model, serves as the central node. They make answers to users' prompts and make decisions, communicating with camera, arms and feet by ROS messages. In this projects, I open-sourced the large language model and camera's code, as well as the ROS publisher nodes for communication
-## Contents
-1. [cn_chat.py](https://github.com/charliezcr/Xiaohao/blob/main/cn_chat.py) is the node for large language model. There is a ROS subscriber node subscribing to topic 'wake'. Once the microphone is waked, it sends a message to this node. This node records voice and using VAD. After the voice is recorded, it uses speech recognition model Paraformer to convert sounds to Chinese/English words, and send the prompt to LLM. Once the LLM sends back the answer, the TTS function will convert the words into voice and speak to the users. It also detects whether there is a movement it needs to execute. If the LLM decides to move, the node will send the message of movement to arms, feet or camera, and execute the movement such as turning, marching, taichi performance, finding the objects and move torwards it.
--- [vad.py](https://github.com/charliezcr/Xiaohao/blob/main/vad.py) is the VAD function used in cn_chat.py. [silero_vad](https://github.com/charliezcr/Xiaohao/blob/main/silero_vad.onnx) is the open-sourced VAD model being used all along.
--- [tts_cloud.py](https://github.com/charliezcr/Xiaohao/blob/main/tts_cloud.py) is the tts function used in cn_chat.py
--- [prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/prompt.txt) is the system prompt for large language model used in cn_chat.py
--- [vl_prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/vl_prompt.txt) is the system prompt for vision language model used in cn_chat.py
-2. [rs_cam.py](
+Welcome to the GitHub repository of Xiaohao, an embodied intelligence system designed by Shenhao. Xiaohao is a humanoid robot equipped with multi-agent systems. This project integrates a large language model and a vision language model at its core, supported by robotic arms, mobility wheels, and a camera. These components communicate via ROS messages, allowing Xiaohao to respond to user prompts, make decisions, and interact with its environment.<br>
+
+In this repository, you will find the open-sourced code for the large language model and the camera, as well as the ROS publisher nodes responsible for orchestrating communications among the different components.
+
+## Repository Contents
+1. **Language Processing Nodes:**
+   - **[cn_chat.py](https://github.com/charliezcr/Xiaohao/blob/main/cn_chat.py):** This node operates as a ROS subscriber to the 'wake' topic. Upon activation, it records audio, processes it using VAD (Voice Activity Detection), and converts the audio to text via the Paraformer speech recognition model. The text is then processed by the large language model (LLM) to generate responses, which are converted back to speech to interact with users. This node also handles movement commands for the robot.<br>
+     - **[vad.py](https://github.com/charliezcr/Xiaohao/blob/main/vad.py):** Voice activity detection function utilized in cn_chat.py.<br>
+     - **[silero_vad.onnx](https://github.com/charliezcr/Xiaohao/blob/main/silero_vad.onnx):** Open-source VAD model used throughout the project.<br>
+     - **[tts_cloud.py](https://github.com/charliezcr/Xiaohao/blob/main/tts_cloud.py):** Text-to-speech function used in cn_chat.py.<br>
+     - **[prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/prompt.txt):** System prompt for the large language model.<br>
+     - **[vl_prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/vl_prompt.txt):** System prompt for the vision language model.
+
+2. **Camera and Vision Processing:**
+   - **[rs_cam.py](https://github.com/charliezcr/Xiaohao/blob/main/rs_cam.py):** This node manages the Intel® RealSense™ Stereo depth camera. It subscribes to the 'camera' topic and, upon receiving commands, captures color and depth images, identifies objects, and communicates with mobility components to navigate towards them.
+
+3. **ROS Communication Nodes:**
+   - **[game.py](https://github.com/charliezcr/Xiaohao/blob/main/game.py):** A ROS publisher node that communicates with the arms and camera to start or stop a rock-paper-scissors game.<br>
+   - **[arm_control.py](https://github.com/charliezcr/Xiaohao/blob/main/arm_control.py):** Manages arm movements, such as lifting and performing taichi exercises.<br>
+   - **[move_ros.py](https://github.com/charliezcr/Xiaohao/blob/main/move_ros.py):** Controls the robot's feet/wheels for turning and marching movements.
