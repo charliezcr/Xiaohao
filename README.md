@@ -1,2 +1,10 @@
 # Xiaohao
-The embodied intelligence of Shenhao's humanoid Xiaohao
+## Project Overview
+This is the embodied intelligence of Shenhao's humanoid Xiaohao. The intelligence of Xiaohao is a multi-agent systems; including a large language model, a vision language model, robotic arms, feet(wheels) and camera. The large language model, together with vision language model, serves as the central node. They make answers to users' prompts and make decisions, communicating with camera, arms and feet by ROS messages. In this projects, I open-sourced the large language model and camera's code, as well as the ROS publisher nodes for communication
+## Contents
+1. [cn_chat.py](https://github.com/charliezcr/Xiaohao/blob/main/cn_chat.py) is the node for large language model. There is a ROS subscriber node subscribing to topic 'wake'. Once the microphone is waked, it sends a message to this node. This node records voice and using VAD. After the voice is recorded, it uses speech recognition model Paraformer to convert sounds to Chinese/English words, and send the prompt to LLM. Once the LLM sends back the answer, the TTS function will convert the words into voice and speak to the users. It also detects whether there is a movement it needs to execute. If the LLM decides to move, the node will send the message of movement to arms, feet or camera, and execute the movement such as turning, marching, taichi performance, finding the objects and move torwards it.
+-- [vad.py](https://github.com/charliezcr/Xiaohao/blob/main/vad.py) is the VAD function used in cn_chat.py. [silero_vad](https://github.com/charliezcr/Xiaohao/blob/main/silero_vad.onnx) is the open-sourced VAD model being used all along.
+-- [tts_cloud.py](https://github.com/charliezcr/Xiaohao/blob/main/tts_cloud.py) is the tts function used in cn_chat.py
+-- [prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/prompt.txt) is the system prompt for large language model used in cn_chat.py
+-- [vl_prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/vl_prompt.txt) is the system prompt for vision language model used in cn_chat.py
+2. [rs_cam.py](
