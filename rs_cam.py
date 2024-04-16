@@ -7,38 +7,45 @@ import mmap
 import rospy
 from std_msgs.msg import String
 import time
-import matplotlib.image as img
 
+# 打开共享内存
 shm_fd = os.open('/dev/shm/camera_6', os.O_CREAT | os.O_TRUNC | os.O_RDWR)
 shm_fd2 = os.open('/dev/shm/camera_7', os.O_CREAT | os.O_TRUNC | os.O_RDWR)
 
 
 def callback(data):
     global align
+    # save a png file
     if data.data == 'png':
         print(color_image.shape)
         cv2.imwrite("/home/robot/shoushi_detect/image/color_image.png", color_image)
+    # save a jpg file
     if data.data == 'jpg':
         cv2.imwrite("/home/robot/shoushi_detect/image/color_image.jpg", color_image)
-        
+    # locate item and move towards it
     if data.data.startswith('locate'):
+        # get the 2d coordinates
         coord = data.data.split(':')[1:3]
         x = int(coord[0])
         y = int(coord[1])
-        aligned_frames = align.process(frames)  # 获取对齐帧
-        aligned_depth_frame = aligned_frames.get_depth_frame()
+        aligned_frames = align.process(frames)  # get aligned frames
+        aligned_depth_frame = aligned_frames.get_depth_frame()  # get depth frame
         dis = aligned_depth_frame.get_distance(x, y)  # （x, y)点的真实深度值
         depth_intrin = aligned_depth_frame.profile.as_video_stream_profile().intrinsics
+        # get 3D coordinates
         camera_coordinate = rs.rs2_deproject_pixel_to_point(depth_intrin, [x, y], dis)
         print(camera_coordinate)
+        # check whether turn left or right
         direction = 'right_'
         if camera_coordinate[0] < 0:
             direction = 'left_'
+        # calculate the angle to turn
         angle_offset_x = np.arctan2(camera_coordinate[0], camera_coordinate[2])
         angle_offset_x_deg = int(np.abs(np.degrees(angle_offset_x)))
         turn = 'python /home/robot/shoushi_detect/move_ros.py ' + direction + str(angle_offset_x_deg) + '_degree'
         os.system(turn)
         time.sleep(1)
+        # calculate the distance to move
         hypotenuse = np.sqrt(camera_coordinate[0]**2 + camera_coordinate[2]**2)
         distance = round(hypotenuse, 2)
         if distance > 1.2:
@@ -47,6 +54,7 @@ def callback(data):
             distance -= 0.3
         else:
             distance *= 0.8
+        # move
         march = 'python /home/robot/shoushi_detect/move_ros.py forward_' + str(distance) + '_m'
         print(march)
         os.system(march)
