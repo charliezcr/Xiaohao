@@ -1,4 +1,4 @@
-![image](https://github.com/charliezcr/Xiaohao/assets/48685281/c79a0f10-bbcd-4347-9803-52ee3391f9ff)# Xiaohao: Embodied Intelligence Project
+# Xiaohao: Embodied Intelligence Project
 
 ## Project Overview
 Welcome to the GitHub repository of Xiaohao, an embodied intelligence system designed by Shenhao. Xiaohao is a humanoid robot equipped with multi-agent systems. This project integrates a large language model and a vision language model at its core, supported by robotic arms, mobility wheels, and a camera. These components communicate via ROS messages, allowing Xiaohao to respond to user prompts, make decisions, and interact with its environment.<br>
@@ -21,6 +21,8 @@ In this repository, you will find the open-sourced code for the large language m
    - **[game.py](https://github.com/charliezcr/Xiaohao/blob/main/game.py):** A ROS publisher node that communicates with the arms and camera to start or stop a rock-paper-scissors game.<br>
    - **[arm_control.py](https://github.com/charliezcr/Xiaohao/blob/main/arm_control.py):** Manages arm movements, such as lifting and performing taichi exercises.<br>
    - **[move_ros.py](https://github.com/charliezcr/Xiaohao/blob/main/move_ros.py):** Controls the robot's feet/wheels for turning and marching movements.
+
+## Flow Chart
 
    ![image](https://github.com/charliezcr/Xiaohao/assets/48685281/260d725f-23eb-4b71-b490-533a100ef9d7)
 
