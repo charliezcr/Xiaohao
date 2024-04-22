@@ -38,7 +38,7 @@ import torch
 ########################################################################
 # connect to dashscope
 ssl._create_default_https_context = ssl._create_unverified_context
-dashscope.api_key = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+dashscope.api_key = 'sk-2a3454a674d94ef49e391da8ca868e4d'
 callback = Callback()
 # initialize speech recognition model with hot words
 with open('hotword.txt', 'r', encoding='utf-8') as f:
@@ -404,8 +404,8 @@ def generate_embeddings(doc):
 # search for relevant text in the vector database
 def search_relevant_doc(question, collection_name, topk):
     client = Client(
-        api_key='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-        endpoint='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+        api_key='sk-jZ00txztmfCQwBUSRXRO1329sH5Uz709C961AAACA11EE9AF68E44DE4FB961',
+        endpoint='vrs-cn-nwy3mdv5400022.dashvector.cn-hangzhou.aliyuncs.com'
     )
     collection = client.get(collection_name)
     rsp = collection.query(question, output_fields=['raw'], topk=topk)
@@ -604,6 +604,7 @@ def locate(item, round):
 
 # save the movement in the memory and execute the task
 def movement_queue(topic, code):
+    global music
     queue = memory[topic]
     threshold = timedelta(seconds=0)
     if len(queue) > 0:
@@ -613,7 +614,7 @@ def movement_queue(topic, code):
         if topic == 'arm_control.py':
             # taichi
             if task == '3':
-                threshold = timedelta(seconds=67)
+                threshold = timedelta(seconds=68)
             # lift arm
             if task == '2':
                 threshold = timedelta(seconds=3)
@@ -635,16 +636,15 @@ def movement_queue(topic, code):
         end_time = start_time + threshold
         # if the last task did not end, wait
         if end_time > now:
-            wait_time = (now - end_time).seconds+1
+            wait_time = (now - end_time).seconds + 1
             print(f'wait for {wait_time}s')
             time.sleep(wait_time)
     # add to memory
     memory[topic].append((code, datetime.now()))
     # execute the task
     subprocess.run(['python', topic, code])
-    # play music for taichi
     if topic == 'arm_control.py' and code == '3':
-        subprocess.run(['aplay', 'recorded/taiji.wav'])
+        subprocess.Popen(['aplay', 'recorded/taiji.wav'])
 
 
 ########################################################################
@@ -676,13 +676,14 @@ def chat(prompt, personnel=False):
     # Process the generated response
     full_content = stream_tts(responses, msg)
     # load the reply to the message
-    if not personnel:
-        msg.append({'role': Role.ASSISTANT, 'content': full_content})
-        # if the length of message exceeds 3k, pop the oldest round
-        while len(str(msg)) > 3000:
-            msg.pop(1)
-            msg.pop(1)
-        memory['messages'] = msg
+    msg.append({'role': Role.ASSISTANT, 'content': full_content})
+    # if the length of message exceeds 3k, pop the oldest round
+    while len(str(msg)) > 3000:
+        msg.pop(1)
+        msg.pop(1)
+    if personnel:
+        msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
+    memory['messages'] = msg
     # analyze the tasks
     task(full_content)
 
@@ -906,14 +907,16 @@ def wake_callback(msg) -> None:
     - msg (Any): The message containing wake-up signal information.
     """
     # start a new dialog
+    global dialog_proc
     if msg.data == 1:
-        global dialog_proc
+        # stop all sound
+        subprocess.run(['killall', 'aplay'])
         if dialog_proc and dialog_proc.is_alive():
             print("Terminating the dialogue process")
-            # Killing a specific process by PID
-            subprocess.run(['kill', '-9', str(dialog_proc.pid)])
             # Killing processes by name using pkill
             subprocess.run(['pkill', '-9', 'aplay'])
+            # Killing a specific process by PID
+            subprocess.run(['kill', '-9', str(dialog_proc.pid)])
             dialog_proc.join()
 
         # Start a new process for dialogue
@@ -925,10 +928,9 @@ def wake_callback(msg) -> None:
     # perform taichi
     if msg.data == 4:
         # stop all sound
-        subprocess.run(['pkill', '-9', 'aplay'])
+        subprocess.run(['killall', 'aplay'])
         # do taichi
         movement_queue('arm_control.py', '3')
-
 
 
 def subscriber() -> None:
