@@ -38,7 +38,7 @@ import torch
 ########################################################################
 # connect to dashscope
 ssl._create_default_https_context = ssl._create_unverified_context
-dashscope.api_key = 'sk-2a3454a674d94ef49e391da8ca868e4d'
+dashscope.api_key = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 callback = Callback()
 # initialize speech recognition model with hot words
 with open('hotword.txt', 'r', encoding='utf-8') as f:
@@ -404,8 +404,8 @@ def generate_embeddings(doc):
 # search for relevant text in the vector database
 def search_relevant_doc(question, collection_name, topk):
     client = Client(
-        api_key='sk-jZ00txztmfCQwBUSRXRO1329sH5Uz709C961AAACA11EE9AF68E44DE4FB961',
-        endpoint='vrs-cn-nwy3mdv5400022.dashvector.cn-hangzhou.aliyuncs.com'
+        api_key='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        endpoint='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
     )
     collection = client.get(collection_name)
     rsp = collection.query(question, output_fields=['raw'], topk=topk)
