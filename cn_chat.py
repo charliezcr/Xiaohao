@@ -8,6 +8,7 @@ import time
 import json
 import re
 import ssl
+import os
 from vad import VoiceActivityDetection
 import requests
 from bs4 import BeautifulSoup
@@ -38,7 +39,7 @@ import torch
 ########################################################################
 # connect to dashscope
 ssl._create_default_https_context = ssl._create_unverified_context
-dashscope.api_key = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
 callback = Callback()
 # initialize speech recognition model with hot words
 with open('hotword.txt', 'r', encoding='utf-8') as f:
@@ -206,6 +207,191 @@ def face():
     return result
 
 
+# find the stock information for a public company
+def stock_info(company):
+    # Get the current date in the 'YYYYMMDD' format.
+    today = datetime.strftime(datetime.now(), '%Y%m%d')
+    # Get the date 7 days ago in the 'YYYYMMDD' format.
+    begin = datetime.strftime(datetime.now() - timedelta(4), '%Y%m%d')
+
+    # Fetch basic stock information using your stock module.
+    basic = ef.stock.get_base_info(company)
+    try:
+        # Fetch the stock's historical quote data for the past 7 days using your stock module.
+        df = ef.stock.get_quote_history(company, beg=begin, end=today)
+
+        if df.shape[0] > 0:
+            # Prepare and manipulate the DataFrame with stock information.
+            df = df.iloc[:, 2:].set_index(df.columns[2]).sort_values(by='日期', ascending=False)
+            last = df.iloc[0].to_dict()  # Get the latest trading data as a dictionary.
+            # Play an audio sound to indicate that the stock information retrieval is complete.
+        # Construct the final prompt by combining the retrieved stock information.
+        result = f'{company}在上个交易日{df.iloc[0].name}的的交易情况{last}，此外，{company}的基本信息为：{basic}'
+        speak(result)
+        return True
+    except:
+        speak(f'对不起，我没有查询到{company}的股市信息')
+        return False
+
+
+# Use NER to finr the public comany in the prompt and search for its stock information
+def fin_search(prompt):
+    print(prompt)
+    # find Shenhao's stock information
+    if '申昊' in prompt:
+        stock_info('申昊科技')
+    else:
+        # use NER to find the company in the prompt
+        result = ner(prompt)['output']
+        if result == []:
+            subprocess.run(["aplay", "recorded/company_not_found.wav"])
+        else:
+            company = False
+            for name in result:
+                if name['type'] == 'ORG':
+                    company = True
+                    stock_info(name['span'])
+            if not company:
+                subprocess.run(["aplay", "recorded/company_not_found.wav"])
+
+
+# find the public company's code and search for its news on sina
+def stock_cls(company):
+    news = False
+    basic = ef.stock.get_base_info(company)
+    if basic.isna()['股票代码']:
+        basic = ef.stock.get_base_info(company[:2])
+    if basic.isna()['股票代码']:
+        basic = ef.stock.get_base_info(company[:3])
+    if not basic.isna()['股票代码']:
+        stock = basic['股票代码']
+        place = basic['板块编号'][:2]
+        if place == 'HK':
+            try:
+                news = scrape_hk(stock)
+            except:
+                pass
+        elif place == 'US':
+            try:
+                news = scrape_us(stock)
+            except:
+                pass
+        elif place == 'BK':
+            if stock.find('60', 0, 3) == 0:
+                stock_type = 'sh'
+            elif stock.find('688', 0, 4) == 0:
+                stock_type = 'sh'
+            elif stock.find('900', 0, 4) == 0:
+                stock_type = 'sh'
+            elif stock.find('00', 0, 3) == 0:
+                stock_type = 'sz'
+            elif stock.find('300', 0, 4) == 0:
+                stock_type = 'sz'
+            elif stock.find('200', 0, 4) == 0:
+                stock_type = 'sz'
+            try:
+                news = scrape_cn(stock_type + stock)
+            except:
+                pass
+    if news:
+        speak(f'以下是新浪财经上关于{company}的新闻')
+        for n in news:
+            speak(n)
+    else:
+        subprocess.run(["aplay", "recorded/company_not_found.wav"])
+
+
+# scraping the news on sina for public companies listed on Chinese stock market
+def scrape_cn(code):
+    url = f'https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{code.lower()}.phtml'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    datelist = soup.find('div', {'class': 'datelist'})
+    if datelist:
+        news = datelist.ul.text.split('\xa0\xa0\xa0\xa0')
+        news = news[1:min(6, len(news))]
+        final = []
+        for title in news:
+            pieces = title.split('\xa0')
+            time = pieces[0]
+            text = pieces[-1]
+            if ')：' in text:
+                sentence = text.split(')：')
+                text = sentence[0].split('(')[0] + sentence[1]
+            final.append(time + ' ' + text.strip())
+    return final
+
+
+# scraping the news on sina for public companies listed on HK stock market
+def scrape_hk(code):
+    url = f'https://stock.finance.sina.com.cn/hkstock/news/{code}.html'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    datelist = soup.find('ul', {'class': 'list01', 'id': 'js_ggzx'}).find_all('li')
+    if datelist:
+        datelist = datelist[0:min(len(datelist), 5)]
+        final = []
+        for news in datelist:
+            final.append(news.span.text.split(' ')[0] + ' ' + news.a.text)
+    return final
+
+
+# scraping the news on sina for public companies listed on American stock market
+def scrape_us(code):
+    url = f'https://biz.finance.sina.com.cn/usstock/usstock_news.php?symbol={code}'
+    response = requests.get(url)
+    response.encoding = 'gbk'
+    soup = BeautifulSoup(response.text, 'html.parser')
+    datelist = soup.find('ul', {'class': 'xb_list'}).find_all('li')
+    if datelist:
+        datelist = datelist[0:min(len(datelist), 5)]
+        final = []
+        for news in datelist:
+            final.append(news.span.text.split('| ')[1].split(' ')[0] + ' ' + news.a.text)
+    return final
+
+
+# search news
+def news_search(prompt):
+    print(prompt)
+    if '申昊' in prompt:
+        news = scrape_cn('sz300853')
+        if news:
+            subprocess.run(["aplay", f"recorded/shenhao_news.wav"])
+            for n in news:
+                speak(n)
+        else:
+            subprocess.run(["aplay", f"recorded/no_response.wav"])
+    else:
+        result = ner(prompt)['output']
+        print(result)
+        if result == []:
+            subprocess.run(["aplay", "recorded/company_not_found.wav"])
+        else:
+            company = False
+            for name in result:
+                if name['type'] == 'ORG':
+                    company = True
+                    stock_cls(name['span'])
+            if not company:
+                subprocess.run(["aplay", "recorded/company_not_found.wav"])
+
+
+# search Hangzhou's weather
+def weather():
+    url = "http://www.nmc.cn/rest/weather?stationid=58457&_=1709888356915"
+    # 请求响应
+    reponse = requests.get(url)
+    # 转换数据格式
+    reponse_json = json.loads(reponse.text)
+    # 获取需要的数据定位
+    data = reponse_json["data"]["real"]
+    weather = data["weather"]
+    wind = data["wind"]
+    result = f"杭州当前天气：{weather['info']}，气温：{int(weather['temperature'])}度，湿度：{int(weather['humidity'])}。{wind['direct']}：{wind['power']}"
+    return result
+
+
 ########################################################################
 # RAG
 ########################################################################
@@ -218,10 +404,7 @@ def generate_embeddings(doc):
 
 # search for relevant text in the vector database
 def search_relevant_doc(question, collection_name, topk):
-    client = Client(
-        api_key='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-        endpoint='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-    )
+    client = Client(api_key=os.getenv('DASHVECTOR_API_KEY'), endpoint=os.getenv('DASHVECTOR_API_KEY'))
     collection = client.get(collection_name)
     rsp = collection.query(question, output_fields=['raw'], topk=topk)
     if topk == 1:
@@ -500,7 +683,7 @@ def chat(prompt, personnel=False):
         msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
     memory['messages'] = msg
     # analyze the tasks
-    task(full_content)
+    task(full_content, prompt)
 
 
 # search if the prompt contains keywords
@@ -584,7 +767,7 @@ def vl_chat(prompt):
 
 
 # execute the task in the reply
-def task(text):
+def task(text, raw_prompt):
     prompts = text.split('《《')
     if len(prompts) > 1:
         prompts = prompts[1:]
@@ -625,6 +808,8 @@ def task(text):
             if '正在定位' in prompt:
                 target = prompt.split('||')[1].split("》》")[0]
                 locate(target, 0)
+            if '拍照' in prompt:
+                vl_chat(prompt, raw_prompt)
 
 
 def dialog() -> None:
@@ -677,11 +862,25 @@ def dialog() -> None:
             else:
                 subprocess.run(["aplay", f"recorded/no_response.wav"])
 
+        # Provide context for weather in Hangzhou
+        elif '天气' in prompt:
+            raw_prompt = f'请根据以下信息：{weather()}，回答问题：{prompt}'
+
+        # Search financial information using Named Entity Recognition (NER), bypassing LLM
+        elif contains_keywords(prompt, [['股市', '金融'], '模式']):
+            respond = False  # Shut the LLM up
+            fin_search(prompt)  # search financial information
+
         # Turn on personnel mode with RAG
         elif contains_keywords(prompt, [['人员', '员工'], '模式']):
             personnel = True  # Enable RAG for personnel search
             raw_prompt = prompt
             subprocess.run(["aplay", f"recorded/personnel_mode.wav"])  # play the sound of "search for personnel"
+
+        # Search for news information using NER, bypassing LLM
+        elif contains_keywords(prompt, [['新闻', '资讯'], '模式']):
+            respond = False
+            news_search(prompt)
 
         # Introduce "Shenhao" immediately, bypassing LLM
         elif contains_keywords(prompt, ['申昊', '介绍']):
