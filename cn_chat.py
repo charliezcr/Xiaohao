@@ -455,7 +455,7 @@ def chat(prompt, personnel=False):
         incremental_output=True
     )
     # Process the generated response
-    full_content = stream_tts(responses, msg)
+    full_content = stream_tts(responses)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': full_content})
     # if the length of message exceeds 3k, pop the oldest round
