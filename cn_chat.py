@@ -5,21 +5,16 @@ import signal
 import pyaudio
 from array import array
 import time
-import json
 import re
 import ssl
 import os
 from vad import VoiceActivityDetection
-import requests
-from bs4 import BeautifulSoup
 import subprocess
-import efinance as ef
 from http import HTTPStatus
 from multiprocessing import Process, Manager
 from random import randint
 import dashscope
 import rospy
-# from langid import classify
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from dashscope import Generation, TextEmbedding, MultiModalConversation
@@ -207,191 +202,6 @@ def face():
     return result
 
 
-# find the stock information for a public company
-def stock_info(company):
-    # Get the current date in the 'YYYYMMDD' format.
-    today = datetime.strftime(datetime.now(), '%Y%m%d')
-    # Get the date 7 days ago in the 'YYYYMMDD' format.
-    begin = datetime.strftime(datetime.now() - timedelta(4), '%Y%m%d')
-
-    # Fetch basic stock information using your stock module.
-    basic = ef.stock.get_base_info(company)
-    try:
-        # Fetch the stock's historical quote data for the past 7 days using your stock module.
-        df = ef.stock.get_quote_history(company, beg=begin, end=today)
-
-        if df.shape[0] > 0:
-            # Prepare and manipulate the DataFrame with stock information.
-            df = df.iloc[:, 2:].set_index(df.columns[2]).sort_values(by='日期', ascending=False)
-            last = df.iloc[0].to_dict()  # Get the latest trading data as a dictionary.
-            # Play an audio sound to indicate that the stock information retrieval is complete.
-        # Construct the final prompt by combining the retrieved stock information.
-        result = f'{company}在上个交易日{df.iloc[0].name}的的交易情况{last}，此外，{company}的基本信息为：{basic}'
-        speak(result)
-        return True
-    except:
-        speak(f'对不起，我没有查询到{company}的股市信息')
-        return False
-
-
-# Use NER to finr the public comany in the prompt and search for its stock information
-def fin_search(prompt):
-    print(prompt)
-    # find Shenhao's stock information
-    if '申昊' in prompt:
-        stock_info('申昊科技')
-    else:
-        # use NER to find the company in the prompt
-        result = ner(prompt)['output']
-        if result == []:
-            subprocess.run(["aplay", "recorded/company_not_found.wav"])
-        else:
-            company = False
-            for name in result:
-                if name['type'] == 'ORG':
-                    company = True
-                    stock_info(name['span'])
-            if not company:
-                subprocess.run(["aplay", "recorded/company_not_found.wav"])
-
-
-# find the public company's code and search for its news on sina
-def stock_cls(company):
-    news = False
-    basic = ef.stock.get_base_info(company)
-    if basic.isna()['股票代码']:
-        basic = ef.stock.get_base_info(company[:2])
-    if basic.isna()['股票代码']:
-        basic = ef.stock.get_base_info(company[:3])
-    if not basic.isna()['股票代码']:
-        stock = basic['股票代码']
-        place = basic['板块编号'][:2]
-        if place == 'HK':
-            try:
-                news = scrape_hk(stock)
-            except:
-                pass
-        elif place == 'US':
-            try:
-                news = scrape_us(stock)
-            except:
-                pass
-        elif place == 'BK':
-            if stock.find('60', 0, 3) == 0:
-                stock_type = 'sh'
-            elif stock.find('688', 0, 4) == 0:
-                stock_type = 'sh'
-            elif stock.find('900', 0, 4) == 0:
-                stock_type = 'sh'
-            elif stock.find('00', 0, 3) == 0:
-                stock_type = 'sz'
-            elif stock.find('300', 0, 4) == 0:
-                stock_type = 'sz'
-            elif stock.find('200', 0, 4) == 0:
-                stock_type = 'sz'
-            try:
-                news = scrape_cn(stock_type + stock)
-            except:
-                pass
-    if news:
-        speak(f'以下是新浪财经上关于{company}的新闻')
-        for n in news:
-            speak(n)
-    else:
-        subprocess.run(["aplay", "recorded/company_not_found.wav"])
-
-
-# scraping the news on sina for public companies listed on Chinese stock market
-def scrape_cn(code):
-    url = f'https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{code.lower()}.phtml'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    datelist = soup.find('div', {'class': 'datelist'})
-    if datelist:
-        news = datelist.ul.text.split('\xa0\xa0\xa0\xa0')
-        news = news[1:min(6, len(news))]
-        final = []
-        for title in news:
-            pieces = title.split('\xa0')
-            time = pieces[0]
-            text = pieces[-1]
-            if ')：' in text:
-                sentence = text.split(')：')
-                text = sentence[0].split('(')[0] + sentence[1]
-            final.append(time + ' ' + text.strip())
-    return final
-
-
-# scraping the news on sina for public companies listed on HK stock market
-def scrape_hk(code):
-    url = f'https://stock.finance.sina.com.cn/hkstock/news/{code}.html'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    datelist = soup.find('ul', {'class': 'list01', 'id': 'js_ggzx'}).find_all('li')
-    if datelist:
-        datelist = datelist[0:min(len(datelist), 5)]
-        final = []
-        for news in datelist:
-            final.append(news.span.text.split(' ')[0] + ' ' + news.a.text)
-    return final
-
-
-# scraping the news on sina for public companies listed on American stock market
-def scrape_us(code):
-    url = f'https://biz.finance.sina.com.cn/usstock/usstock_news.php?symbol={code}'
-    response = requests.get(url)
-    response.encoding = 'gbk'
-    soup = BeautifulSoup(response.text, 'html.parser')
-    datelist = soup.find('ul', {'class': 'xb_list'}).find_all('li')
-    if datelist:
-        datelist = datelist[0:min(len(datelist), 5)]
-        final = []
-        for news in datelist:
-            final.append(news.span.text.split('| ')[1].split(' ')[0] + ' ' + news.a.text)
-    return final
-
-
-# search news
-def news_search(prompt):
-    print(prompt)
-    if '申昊' in prompt:
-        news = scrape_cn('sz300853')
-        if news:
-            subprocess.run(["aplay", f"recorded/shenhao_news.wav"])
-            for n in news:
-                speak(n)
-        else:
-            subprocess.run(["aplay", f"recorded/no_response.wav"])
-    else:
-        result = ner(prompt)['output']
-        print(result)
-        if result == []:
-            subprocess.run(["aplay", "recorded/company_not_found.wav"])
-        else:
-            company = False
-            for name in result:
-                if name['type'] == 'ORG':
-                    company = True
-                    stock_cls(name['span'])
-            if not company:
-                subprocess.run(["aplay", "recorded/company_not_found.wav"])
-
-
-# search Hangzhou's weather
-def weather():
-    url = "http://www.nmc.cn/rest/weather?stationid=58457&_=1709888356915"
-    # 请求响应
-    reponse = requests.get(url)
-    # 转换数据格式
-    reponse_json = json.loads(reponse.text)
-    # 获取需要的数据定位
-    data = reponse_json["data"]["real"]
-    weather = data["weather"]
-    wind = data["wind"]
-    result = f"杭州当前天气：{weather['info']}，气温：{int(weather['temperature'])}度，湿度：{int(weather['humidity'])}。{wind['direct']}：{wind['power']}"
-    return result
-
-
 ########################################################################
 # RAG
 ########################################################################
@@ -440,34 +250,8 @@ def speak(text):
     SpeechSynthesizer.call(model='sambert-zhistella-v1', text=text, sample_rate=16000, format='pcm', callback=callback)
 
 
-# tts for multiple languages
-def multi_speak(text):
-    # Detect the language of the input text using 'classify' function (not provided in the code).
-    result = classify(text)[0]
-    # Select a voice based on the detected language.
-    if result == 'en':
-        voice = 'sambert-cindy-v1'  # English voice
-    elif result == 'es':
-        voice = 'sambert-camila-v1'  # Spanish voice
-    elif result == 'it':
-        voice = 'sambert-perla-v1'  # Italian voice
-    elif result == 'id':
-        voice = 'sambert-indah-v1'  # Indonesian voice
-    elif result == 'de':
-        voice = 'sambert-hanna-v1'  # German voice
-    elif result == 'th':
-        voice = 'sambert-waan-v1'  # Thai voice
-    elif result == 'fr':
-        voice = 'sambert-clara-v1'  # French voice
-    else:
-        voice = 'sambert-zhistella-v1'  # Default voice (Chinese)
-
-    # Use the selected voice to synthesize the input text using 'SpeechSynthesizer.call'.
-    SpeechSynthesizer.call(model=voice, text=text, sample_rate=16000, format='pcm', callback=callback)
-
-
 # tts for streaming the reply
-def stream_tts(responses, msg):
+def stream_tts(responses):
     full_content = ''  # with incrementally we need to merge output.
     curr = ''
     for response in responses:
@@ -602,7 +386,6 @@ def locate(item, round):
 
 # save the movement in the memory and execute the task
 def movement_queue(topic, code):
-    global music
     queue = memory[topic]
     threshold = timedelta(seconds=0)
     if len(queue) > 0:
@@ -763,7 +546,7 @@ def vl_chat(prompt):
         msg.pop(1)
     memory['vl'] = msg
     memory['messages'] = text_msg
-    task(full_content)
+    task(full_content, prompt)
 
 
 # execute the task in the reply
