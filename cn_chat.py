@@ -8,6 +8,8 @@ import time
 import re
 import ssl
 import os
+import json
+import requests
 from vad import VoiceActivityDetection
 import subprocess
 from http import HTTPStatus
@@ -42,8 +44,6 @@ with open('hotword.txt', 'r', encoding='utf-8') as f:
 paraformer = pipeline(task=Tasks.auto_speech_recognition,
                       model='./iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
                       model_revision="v2.0.4")
-# initialize NER model for financial mode and news mode
-ner = pipeline(Tasks.named_entity_recognition, './iic/nlp_raner_named-entity-recognition_chinese-base-news')
 # start dialog process
 dialog_proc = None
 # initialize face recognition model
@@ -202,6 +202,21 @@ def face():
     return result
 
 
+# search Hangzhou's weather
+def weather():
+    url = "http://www.nmc.cn/rest/weather?stationid=58457&_=1709888356915"
+    # 请求响应
+    reponse = requests.get(url)
+    # 转换数据格式
+    reponse_json = json.loads(reponse.text)
+    # 获取需要的数据定位
+    data = reponse_json["data"]["real"]
+    weather_now = data["weather"]
+    wind = data["wind"]
+    result = f"杭州当前天气：{weather_now['info']}，气温：{int(weather_now['temperature'])}度，湿度：{int(weather_now['humidity'])}。{wind['direct']}：{wind['power']}"
+    return result
+
+
 ########################################################################
 # RAG
 ########################################################################
@@ -217,6 +232,7 @@ def search_relevant_doc(question, collection_name, topk):
     client = Client(api_key=os.getenv('DASHVECTOR_API_KEY'), endpoint=os.getenv('DASHVECTOR_API_KEY'))
     collection = client.get(collection_name)
     rsp = collection.query(question, output_fields=['raw'], topk=topk)
+    # for face recognition, select the closest result
     if topk == 1:
         result = rsp.output[0]
         raw = rsp.output[0].fields['raw']
@@ -227,6 +243,7 @@ def search_relevant_doc(question, collection_name, topk):
             return False
         else:
             return raw
+    # for RAG, select the closest k results
     else:
         result = [raw.fields['raw'] for raw in rsp.output]
         return ';'.join(result)
@@ -592,7 +609,7 @@ def task(text, raw_prompt):
                 target = prompt.split('||')[1].split("》》")[0]
                 locate(target, 0)
             if '拍照' in prompt:
-                vl_chat(prompt, raw_prompt)
+                vl_chat(raw_prompt)
 
 
 def dialog() -> None:
@@ -649,21 +666,11 @@ def dialog() -> None:
         elif '天气' in prompt:
             raw_prompt = f'请根据以下信息：{weather()}，回答问题：{prompt}'
 
-        # Search financial information using Named Entity Recognition (NER), bypassing LLM
-        elif contains_keywords(prompt, [['股市', '金融'], '模式']):
-            respond = False  # Shut the LLM up
-            fin_search(prompt)  # search financial information
-
         # Turn on personnel mode with RAG
         elif contains_keywords(prompt, [['人员', '员工'], '模式']):
             personnel = True  # Enable RAG for personnel search
             raw_prompt = prompt
             subprocess.run(["aplay", f"recorded/personnel_mode.wav"])  # play the sound of "search for personnel"
-
-        # Search for news information using NER, bypassing LLM
-        elif contains_keywords(prompt, [['新闻', '资讯'], '模式']):
-            respond = False
-            news_search(prompt)
 
         # Introduce "Shenhao" immediately, bypassing LLM
         elif contains_keywords(prompt, ['申昊', '介绍']):
@@ -696,8 +703,6 @@ def wake_callback(msg) -> None:
         subprocess.run(['killall', 'aplay'])
         if dialog_proc and dialog_proc.is_alive():
             print("Terminating the dialogue process")
-            # Killing processes by name using pkill
-            subprocess.run(['pkill', '-9', 'aplay'])
             # Killing a specific process by PID
             subprocess.run(['kill', '-9', str(dialog_proc.pid)])
             dialog_proc.join()
