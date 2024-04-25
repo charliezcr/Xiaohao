@@ -3,7 +3,8 @@ import pyaudio
 from dashscope.api_entities.dashscope_response import SpeechSynthesisResponse
 from dashscope.audio.tts import ResultCallback, SpeechSynthesizer, SpeechSynthesisResult
 import argparse
-dashscope.api_key = 'xxxxxxxxxxxxxxxxxxxxxxx'
+import os
+dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
 
 
 class Callback(ResultCallback):
