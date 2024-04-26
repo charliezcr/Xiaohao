@@ -229,7 +229,7 @@ def generate_embeddings(doc):
 
 # search for relevant text in the vector database
 def search_relevant_doc(question, collection_name, topk):
-    client = Client(api_key=os.getenv('DASHVECTOR_API_KEY'), endpoint=os.getenv('DASHVECTOR_API_KEY'))
+    client = Client(api_key=os.getenv('DASHVECTOR_API_KEY'), endpoint=os.getenv('DASHVECTOR_ENDPOINT'))
     collection = client.get(collection_name)
     rsp = collection.query(question, output_fields=['raw'], topk=topk)
     # for face recognition, select the closest result
@@ -608,7 +608,7 @@ def task(text, raw_prompt):
             if '正在定位' in prompt:
                 target = prompt.split('||')[1].split("》》")[0]
                 locate(target, 0)
-            if '拍照' in prompt:
+            if '拍照' in prompt or '环视' in prompt:
                 vl_chat(raw_prompt)
 
 
