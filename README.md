@@ -21,6 +21,7 @@ In this repository, you will find the open-sourced code for the large language m
    - **[game.py](https://github.com/charliezcr/Xiaohao/blob/main/game.py):** communicates with the arms and camera to start or stop a rock-paper-scissors game.<br>
    - **[arm_control.py](https://github.com/charliezcr/Xiaohao/blob/main/arm_control.py):** Manages arm movements, such as lifting and performing taichi exercises.<br>
    - **[move_ros.py](https://github.com/charliezcr/Xiaohao/blob/main/move_ros.py):** Controls the robot's feet/wheels for turning and marching movements.<br>
+   - **[nagivation.py](https://github.com/charliezcr/Xiaohao/blob/main/navigation.py):** communicates with the navigation system for moving to designated positions<br>
    - **[camera.py](https://github.com/charliezcr/Xiaohao/blob/main/camera.py):** communicates with the camera to take pictues and chat with VLM.
 
 ## Flow Chart
