@@ -46,6 +46,7 @@ paraformer = pipeline(task=Tasks.auto_speech_recognition,
                       model_revision="v2.0.4")
 # start dialog process
 dialog_proc = None
+next_round = True
 # initialize face recognition model
 retina = pipeline("face_recognition", model='./model/cv_retinafce_recognition', model_revision='v2.0.2')
 # load the system prompts
@@ -59,6 +60,7 @@ memory['messages'] = [{'role': Role.SYSTEM, 'content': sys_prompt}]  # LLM's mem
 memory['vl'] = [{'role': Role.SYSTEM, 'content': [{'text': vl_sys_prompt}]}]  # VL's memory
 memory['arm_control.py'] = []  # arm's memory
 memory['move_ros.py'] = []  # wheel's memory
+memory['position'] = 601
 # initialize VAD
 vad = VoiceActivityDetection()
 # done with initialization play start voice
@@ -83,6 +85,7 @@ def int2float(sound):
 
 # record audio
 def listen():
+    global next_round
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 16000
@@ -143,6 +146,10 @@ def listen():
 
             # Start point detection
             if not triggered:
+                if TimeUse > 20:
+                    next_round = False
+                    print('end of listening')
+                    return False
                 ring_buffer.append(chunk)
                 num_voiced = sum(ring_buffer_flags)
                 if num_voiced > 0.8 * NUM_WINDOW_CHUNKS:
@@ -155,7 +162,7 @@ def listen():
                 voiced_frames.append(chunk)
                 ring_buffer.append(chunk)
                 num_unvoiced = NUM_WINDOW_CHUNKS_END - sum(ring_buffer_flags_end)
-                if num_unvoiced > 0.90 * NUM_WINDOW_CHUNKS_END or TimeUse > 60:
+                if num_unvoiced > 0.90 * NUM_WINDOW_CHUNKS_END:
                     sys.stdout.write(' Close ')
                     triggered = False
                     got_a_sentence = True
@@ -475,15 +482,20 @@ def chat(prompt, personnel=False):
     full_content = stream_tts(responses)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': full_content})
+    if personnel:
+        msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
     # if the length of message exceeds 3k, pop the oldest round
+    memory['messages'] = check_len(msg)
+    # analyze the tasks
+    task(full_content, prompt)
+
+
+# check if the length of messages exceeds 3k
+def check_len(msg):
     while len(str(msg)) > 3000:
         msg.pop(1)
         msg.pop(1)
-    if personnel:
-        msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
-    memory['messages'] = msg
-    # analyze the tasks
-    task(full_content, prompt)
+    return msg
 
 
 # search if the prompt contains keywords
@@ -566,8 +578,17 @@ def vl_chat(prompt):
     task(full_content, prompt)
 
 
+# move to the point and introduce
+def map_point(num):
+    global next_round
+    memory['position'] = num
+    subprocess.run(['python', 'navigation.py', str(num)])
+    next_round = False
+
+
 # execute the task in the reply
 def task(text, raw_prompt):
+    global next_round
     prompts = text.split('《《')
     if len(prompts) > 1:
         prompts = prompts[1:]
@@ -581,6 +602,7 @@ def task(text, raw_prompt):
                 subprocess.run(['pkill', '-9', 'aplay'])
                 # play music
                 subprocess.run(['aplay', 'recorded/taiji.wav'])
+                time.sleep(65)
             if '太极||开始' in prompt:
                 # stop all sound
                 subprocess.run(['pkill', '-9', 'aplay'])
@@ -592,7 +614,7 @@ def task(text, raw_prompt):
                 if '转' in prompt:
                     turn(prompt)
                 # march
-                else:
+                elif contains_keywords(prompt, [['前', '后', '左', '右']]):
                     march(prompt)
             if '人脸识别||开始' in prompt:
                 face_search = face()
@@ -601,18 +623,59 @@ def task(text, raw_prompt):
                 else:
                     subprocess.run(['aplay', 'recorded/no_face.wav'])
             if '任务||停止' in prompt:
+                next_round = False
                 # stop arm movement
                 subprocess.run(['python', 'arm_control.py', '6'])
                 # stop the game
                 subprocess.run(['python', 'game.py', '2'])
             if '正在定位' in prompt:
                 target = prompt.split('||')[1].split("》》")[0]
-                locate(target, 0)
+                print(target)
+                if '原' in target:
+                    map_point(601)
+                elif '待客' in target:
+                    map_point(0)
+                elif contains_keywords(target, [['车底', '三六零', '360']]):
+                    map_point(6)
+                elif contains_keywords(target, [['遂', '轨交', '刚性', '接触', '网检']]):
+                    map_point(8)
+                elif contains_keywords(target, [['光伏', '清扫', '输煤', '栈桥']]):
+                    map_point(12)
+                elif '四足' in target:
+                    map_point(16)
+                elif contains_keywords(target, [['联合', '挂轨', '开关', '操作']]):
+                    map_point(18)
+                elif contains_keywords(target, [['变电站', '智能巡检']]):
+                    map_point(20)
+                elif contains_keywords(target, [['变压器', '气体', '油中', '声纹']]):
+                    map_point(22)
+                elif '除冰' in target:
+                    map_point(24)
+                elif contains_keywords(target, [['带电', '输电', '微拍', '台区']]):
+                    map_point(26)
+                elif '极寒' in target:
+                    map_point(28)
+                elif contains_keywords(target, [['管控', '监理', '监控']]):
+                    map_point(30)
+                elif '升降' in target:
+                    map_point(32)
+                elif contains_keywords(target, [['创新', '反馈', '电子皮肤', '无人机']]):
+                    map_point(34)
+                elif '防爆' in target:
+                    map_point(38)
+                elif '环保' in target:
+                    map_point(40)
+                elif contains_keywords(target, [['电梯', '厕所', '洗手间', '卫生间']]):
+                    map_point(42)
+                elif contains_keywords(target, [['电动楼梯', '扶梯']]):
+                    map_point(44)
+                else:
+                    locate(target, 0)
             if '拍照' in prompt or '环视' in prompt:
                 vl_chat(raw_prompt)
 
 
-def dialog() -> None:
+def dialog_flow() -> None:
     """
     Manage the dialog process
     """
@@ -621,11 +684,7 @@ def dialog() -> None:
     # Listen to audio input and capture it
     audio = listen()
 
-    # Check if audio capture was successful
-    if not audio:
-        # Play end sound if no audio is captured
-        subprocess.run(["aplay", "recorded/end.wav"])
-    else:
+    if audio:
         # Record the start time of audio processing
         start = time.time()
         # Use a voice recognition model to transcribe audio. 如果是中文的语音识别结果，每个字都是带空格的。如果是英文的话是正常的
@@ -666,6 +725,11 @@ def dialog() -> None:
         elif '天气' in prompt:
             raw_prompt = f'请根据以下信息：{weather()}，回答问题：{prompt}'
 
+        # go back to the original position
+        elif contains_keywords(prompt, ['返回', '原']):
+            subprocess.run(['python', 'navigation.py', '601'])
+            memory['position'] = 601
+
         # Turn on personnel mode with RAG
         elif contains_keywords(prompt, [['人员', '员工'], '模式']):
             personnel = True  # Enable RAG for personnel search
@@ -686,6 +750,22 @@ def dialog() -> None:
             chat(prompt=raw_prompt, personnel=personnel)
 
 
+# keep listening for the next round of dialog
+def dialog():
+    while next_round:
+        dialog_flow()
+
+
+# stop the dialog process
+def terminate():
+    subprocess.run(['killall', 'aplay'])
+    if dialog_proc and dialog_proc.is_alive():
+        print("Terminating the dialogue process")
+        # Killing a specific process by PID
+        subprocess.run(['kill', '-9', str(dialog_proc.pid)])
+        dialog_proc.join()
+
+
 ########################################################################
 # ROS subscriber node
 ########################################################################
@@ -700,19 +780,35 @@ def wake_callback(msg) -> None:
     global dialog_proc
     if msg.data == 1:
         # stop all sound
-        subprocess.run(['killall', 'aplay'])
-        if dialog_proc and dialog_proc.is_alive():
-            print("Terminating the dialogue process")
-            # Killing a specific process by PID
-            subprocess.run(['kill', '-9', str(dialog_proc.pid)])
-            dialog_proc.join()
-
+        terminate()
         # Start a new process for dialogue
         dialog_proc = Process(target=dialog)
         # play the greeting sound
         subprocess.run(["aplay", f"recorded/greet_{randint(1, 3)}.wav"])
         dialog_proc.start()
         rospy.loginfo("Starting a new dialog process")
+
+    # arrived to the designated point
+    if msg.data == 2:
+        # stop all sound
+        terminate()
+        # load introduction text
+        point = memory['position']
+        print(f'arriving at point {point}')
+        if point in [0, 601]:
+            pass
+        elif point in [42, 44]:
+            subprocess.run(["aplay", f"position/{point}.wav"])
+        else:
+            msg = memory['messages']
+            with open(f'position/{point}.txt', 'r', encoding='utf-8') as f:
+                intro = f.read()
+            msg.append({'role': Role.USER, 'content': '请你介绍展品'})
+            msg.append({'role': Role.ASSISTANT, 'content': intro})
+            memory['messages'] = check_len(msg)
+            # play introduction audio
+            subprocess.run(["aplay", f"position/{point}.wav"])
+
     # perform taichi
     if msg.data == 4:
         # stop all sound
