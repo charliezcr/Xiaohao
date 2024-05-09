@@ -37,6 +37,7 @@ import torch
 # connect to dashscope
 ssl._create_default_https_context = ssl._create_unverified_context
 dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
+print(dashscope.api_key)
 callback = Callback()
 # initialize speech recognition model with hot words
 with open('hotword.txt', 'r', encoding='utf-8') as f:
@@ -467,6 +468,8 @@ def chat(prompt, personnel=False):
         msg = [{'role': Role.SYSTEM, 'content': '你是小昊，现在你处于人员模式，你的功能是通过文本资料查找相关人员信息。'}]
         prompt = rag(prompt, 'employee', 3)
     msg.append({'role': Role.USER, 'content': prompt})
+    # if the length of message exceeds 3k, pop the oldest round
+    msg = check_len(msg)
     # Use language generation model to generate a response
     responses = Generation.call(
         Generation.Models.qwen_turbo,
@@ -484,8 +487,7 @@ def chat(prompt, personnel=False):
     msg.append({'role': Role.ASSISTANT, 'content': full_content})
     if personnel:
         msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
-    # if the length of message exceeds 3k, pop the oldest round
-    memory['messages'] = check_len(msg)
+    memory['messages'] = msg
     # analyze the tasks
     task(full_content, prompt)
 
@@ -526,11 +528,11 @@ def vl_chat(prompt):
     text_msg.append({'role': Role.USER, 'content': prompt})
     msg.append({'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
                                                {'text': prompt}]})
+    # check if the length of text messages exceeds 3k
+    text_msg = check_len(text_msg)
+    msg = check_len(msg)
     # get the reply from tongyi vl
-    responses = MultiModalConversation.call(model='qwen-vl-plus',
-                                            messages=msg,
-                                            stream=True,
-                                            incremental_output=True)
+    responses = MultiModalConversation.call(model='qwen-vl-plus', messages=msg, stream=True, incremental_output=True)
     full_content = ''  # with incrementally we need to merge output.
     curr = ''
     for response in responses:
@@ -563,16 +565,8 @@ def vl_chat(prompt):
     print('Full response:\n' + full_content)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': [{'text': full_content}]})
-    # if the length of message exceeds 3k, pop the oldest round
-    while len(str(msg)) > 3000:
-        msg.pop(1)
-        msg.pop(1)
     # load the reply to text message
     text_msg.append({'role': Role.ASSISTANT, 'content': full_content})
-    # if the length of message exceeds 3k, pop the oldest round
-    while len(str(text_msg)) > 3000:
-        msg.pop(1)
-        msg.pop(1)
     memory['vl'] = msg
     memory['messages'] = text_msg
     task(full_content, prompt)
@@ -581,7 +575,9 @@ def vl_chat(prompt):
 # move to the point and introduce
 def map_point(num):
     global next_round
+    # update memory of position
     memory['position'] = num
+    # send the message to navigation system
     subprocess.run(['python', 'navigation.py', str(num)])
     next_round = False
 
@@ -590,25 +586,32 @@ def map_point(num):
 def task(text, raw_prompt):
     global next_round
     prompts = text.split('《《')
+    # execute all task in prompts
     if len(prompts) > 1:
         prompts = prompts[1:]
         for prompt in prompts:
+            # play rock paper scissor
             if '猜拳||开始' in prompt:
+                next_round = False
                 movement_queue('arm_control.py', '2')
+            # lift right arm
             if '右臂||抬起' in prompt:
                 movement_queue('arm_control.py', '2')
+            # play music
             if '音乐||开始' in prompt:
+                next_round = False
                 # stop all sound
                 subprocess.run(['pkill', '-9', 'aplay'])
                 # play music
                 subprocess.run(['aplay', 'recorded/taiji.wav'])
-                time.sleep(65)
+            # play taichi
             if '太极||开始' in prompt:
                 # stop all sound
-                subprocess.run(['pkill', '-9', 'aplay'])
+                next_round = False
                 # do taichi
                 movement_queue('arm_control.py', '3')
                 # play music
+            # move
             if '向' in prompt:
                 # turn
                 if '转' in prompt:
@@ -616,12 +619,15 @@ def task(text, raw_prompt):
                 # march
                 elif contains_keywords(prompt, [['前', '后', '左', '右']]):
                     march(prompt)
+            # face recognition
             if '人脸识别||开始' in prompt:
+                next_round = False
                 face_search = face()
                 if face_search:
                     chat(prompt=face_search, personnel=False)
                 else:
                     subprocess.run(['aplay', 'recorded/no_face.wav'])
+            # stop all the task
             if '任务||停止' in prompt:
                 next_round = False
                 # stop arm movement
@@ -629,6 +635,7 @@ def task(text, raw_prompt):
                 # stop the game
                 subprocess.run(['python', 'game.py', '2'])
             if '正在定位' in prompt:
+                # move to designated point in the exhibition hall
                 target = prompt.split('||')[1].split("》》")[0]
                 print(target)
                 if '原' in target:
@@ -671,6 +678,7 @@ def task(text, raw_prompt):
                     map_point(44)
                 else:
                     locate(target, 0)
+            # if the task requires vision, use VL to chat
             if '拍照' in prompt or '环视' in prompt:
                 vl_chat(raw_prompt)
 
@@ -726,7 +734,7 @@ def dialog_flow() -> None:
             raw_prompt = f'请根据以下信息：{weather()}，回答问题：{prompt}'
 
         # go back to the original position
-        elif contains_keywords(prompt, ['返回', '原']):
+        elif contains_keywords(prompt, ['回', '原']):
             subprocess.run(['python', 'navigation.py', '601'])
             memory['position'] = 601
 
@@ -758,10 +766,11 @@ def dialog():
 
 # stop the dialog process
 def terminate():
+    # kill all aplay sound
     subprocess.run(['killall', 'aplay'])
+    # kil the dialog process
     if dialog_proc and dialog_proc.is_alive():
         print("Terminating the dialogue process")
-        # Killing a specific process by PID
         subprocess.run(['kill', '-9', str(dialog_proc.pid)])
         dialog_proc.join()
 
@@ -769,7 +778,7 @@ def terminate():
 ########################################################################
 # ROS subscriber node
 ########################################################################
-def wake_callback(msg) -> None:
+def wake_callback(ros_msg) -> None:
     """
     Callback function triggered upon a wake-up signal. Initiates or restarts the dialog process.
 
@@ -778,28 +787,34 @@ def wake_callback(msg) -> None:
     """
     # start a new dialog
     global dialog_proc
-    if msg.data == 1:
-        # stop all sound
+    if ros_msg.data == 1:
+        # stop the dialog
         terminate()
         # Start a new process for dialogue
         dialog_proc = Process(target=dialog)
         # play the greeting sound
         subprocess.run(["aplay", f"recorded/greet_{randint(1, 3)}.wav"])
+        # start new conversation
         dialog_proc.start()
         rospy.loginfo("Starting a new dialog process")
 
     # arrived to the designated point
-    if msg.data == 2:
-        # stop all sound
+    if ros_msg.data == 2:
+        # stop the dialog
         terminate()
         # load introduction text
         point = memory['position']
+        # arrived at the designated point
         print(f'arriving at point {point}')
+        # if the point is the waiting point or the home point, stand by
         if point in [0, 601]:
             pass
+        # if the point is the elevator, play the introduction audio
         elif point in [42, 44]:
             subprocess.run(["aplay", f"position/{point}.wav"])
+        # if the point is in the exhibition area, load the context and play the introduction audio
         else:
+            # load the context at the designated point
             msg = memory['messages']
             with open(f'position/{point}.txt', 'r', encoding='utf-8') as f:
                 intro = f.read()
@@ -810,9 +825,9 @@ def wake_callback(msg) -> None:
             subprocess.run(["aplay", f"position/{point}.wav"])
 
     # perform taichi
-    if msg.data == 4:
+    if ros_msg.data == 4:
         # stop all sound
-        subprocess.run(['killall', 'aplay'])
+        terminate()
         # do taichi
         movement_queue('arm_control.py', '3')
 
