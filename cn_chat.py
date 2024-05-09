@@ -379,7 +379,7 @@ def march(prompt):
 # Use vision language model to locate the item
 def locate(item, round):
     # take a photo
-    subprocess.run(['python', 'camera.py', 'jpg'])
+    subprocess.run(['python', 'camera.py', 'png'])
     subprocess.run(["aplay", "recorded/snap.wav"])
     msg = [{'role': Role.SYSTEM, 'content': [{
         'text': "你的任务是做目标检测，每次我将输入一个需要你识别的物体，请你返回box框和坐标。如果你不能找到该物体，请直接回复：《《未找到》》"}]},
