@@ -32,6 +32,7 @@ from tts_cloud import Callback
 import numpy as np
 import torch
 
+
 ########################################################################
 # initialization
 ########################################################################
@@ -274,12 +275,15 @@ def speak(text):
 
 
 # tts for streaming the reply
-def stream_tts(responses, prompt):
+def stream_tts(responses, prompt, vl=False):
     full_content = ''  # with incrementally we need to merge output.
     curr = ''
     for response in responses:
         if response.status_code == HTTPStatus.OK:
             chunk = response.output.choices[0]['message']['content']
+            # get text fot vl chat
+            if vl:
+                chunk = chunk[0]['text']
             sep = re.split('[，：；。！？;!?\n]', chunk)
             curr += sep[0]
             if len(sep) > 1:
@@ -531,34 +535,7 @@ def vl_chat(prompt):
                                                {'text': prompt}]})
     # get the reply from tongyi vl
     responses = MultiModalConversation.call(model='qwen-vl-plus', messages=msg, stream=True, incremental_output=True)
-    full_content = ''  # with incrementally we need to merge output.
-    curr = ''
-    for response in responses:
-        if response.status_code == HTTPStatus.OK:
-            try:
-                chunk = response.output.choices[0]['message']['content'][0]['text']
-                sep = re.split('[，：；。！？;!?\n]', chunk)
-                curr += sep[0]
-                if len(sep) > 1:
-                    execute_task_async(curr, prompt)
-                    if len(sep) > 2:
-                        for phrase in sep[1:-1]:
-                            if phrase != '':
-                                execute_task_async(phrase, prompt)
-                    curr = sep[-1]
-                full_content += chunk
-            except:
-                pass
-        else:
-            print('Request id: %s, Status code: %s, error code: %s, error message: %s' % (
-                response.request_id, response.status_code,
-                response.code, response.message
-            ))
-            subprocess.run(["aplay", "recorded/no_response.wav"])
-    # speak the last sentence
-    if curr.strip() != '':
-        execute_task_async(curr, prompt)
-    print('Full response:\n' + full_content)
+    full_content = stream_tts(responses, prompt, vl=True)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': [{'text': full_content}]})
     # load the reply to text message
@@ -581,11 +558,13 @@ def map_point(num):
 # execute tasks in a thread
 def execute_task_async(content, prompt):
     print(content)
+    # speak the content
     speak(content)
-    # Create a new thread for the task
-    task_thread = threading.Thread(target=task, args=(content, prompt))
-    task_thread.start()
-    task_thread.join()
+    # Create a new thread for the task execution
+    if '《《' in content:
+        task_thread = threading.Thread(target=task, args=(content, prompt))
+        task_thread.start()
+        task_thread.join()
 
 
 # execute the task in the reply
