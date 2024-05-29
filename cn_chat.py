@@ -2,6 +2,7 @@
 import collections
 import sys
 import signal
+import threading
 import pyaudio
 from array import array
 import time
@@ -47,7 +48,6 @@ paraformer = pipeline(task=Tasks.auto_speech_recognition,
                       model_revision="v2.0.4")
 # start dialog process
 dialog_proc = None
-next_round = True
 # initialize face recognition model
 retina = pipeline("face_recognition", model='./model/cv_retinafce_recognition', model_revision='v2.0.2')
 # load the system prompts
@@ -86,7 +86,6 @@ def int2float(sound):
 
 # record audio
 def listen():
-    global next_round
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 16000
@@ -148,7 +147,6 @@ def listen():
             # Start point detection
             if not triggered:
                 if TimeUse > 20:
-                    next_round = False
                     print('end of listening')
                     return False
                 ring_buffer.append(chunk)
@@ -163,7 +161,7 @@ def listen():
                 voiced_frames.append(chunk)
                 ring_buffer.append(chunk)
                 num_unvoiced = NUM_WINDOW_CHUNKS_END - sum(ring_buffer_flags_end)
-                if num_unvoiced > 0.90 * NUM_WINDOW_CHUNKS_END:
+                if num_unvoiced > 0.90 * NUM_WINDOW_CHUNKS_END or TimeUse > 60:
                     sys.stdout.write(' Close ')
                     triggered = False
                     got_a_sentence = True
@@ -276,7 +274,7 @@ def speak(text):
 
 
 # tts for streaming the reply
-def stream_tts(responses):
+def stream_tts(responses, prompt):
     full_content = ''  # with incrementally we need to merge output.
     curr = ''
     for response in responses:
@@ -285,12 +283,11 @@ def stream_tts(responses):
             sep = re.split('[，：；。！？;!?\n]', chunk)
             curr += sep[0]
             if len(sep) > 1:
-                print(curr)
-                speak(curr)
+                execute_task_async(curr, prompt)
                 if len(sep) > 2:
                     for phrase in sep[1:-1]:
                         if phrase != '':
-                            speak(phrase)
+                            execute_task_async(phrase, prompt)
                 curr = sep[-1]
             full_content += chunk
         else:
@@ -301,8 +298,7 @@ def stream_tts(responses):
             subprocess.run(["aplay", "recorded/no_response.wav"])
     # speak the last sentence
     if curr.strip() != '':
-        print(curr)
-        speak(curr)
+        execute_task_async(curr, prompt)
     print('Full response:\n' + full_content)
     return full_content
 
@@ -457,7 +453,7 @@ def movement_queue(topic, code):
 # dialog process
 ########################################################################
 # chat with LLM
-def chat(prompt, personnel=False):
+def chat(prompt, personnel=False, electricity=False):
     web = True
     temperature = 0.6
     msg = memory['messages']
@@ -465,8 +461,15 @@ def chat(prompt, personnel=False):
         web = False
         temperature = 0.3
         # RAG for personnel search
-        msg = [{'role': Role.SYSTEM, 'content': '你是小昊，现在你处于人员模式，你的功能是通过文本资料查找相关人员信息。'}]
+        msg[0] = {'role': Role.SYSTEM, 'content': '你是小昊，现在你处于人员模式，你的功能是通过文本资料查找相关人员信息。'}
         prompt = rag(prompt, 'employee', 3)
+    if electricity:
+        web = True
+        temperature = 0.3
+        # RAG for electricity search
+        msg[0] = {'role': Role.SYSTEM,
+                  'content': '你是小昊，你是一位电力行业的专家。你可以上网搜索，并结合文本资料，回答专业的电力行业问题。'}
+        prompt = rag(prompt, 'electricity', 1)
     msg.append({'role': Role.USER, 'content': prompt})
     # if the length of message exceeds 3k, pop the oldest round
     msg = check_len(msg)
@@ -482,19 +485,17 @@ def chat(prompt, personnel=False):
         incremental_output=True
     )
     # Process the generated response
-    full_content = stream_tts(responses)
+    full_content = stream_tts(responses, prompt)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': full_content})
-    if personnel:
+    if personnel or electricity:
         msg[0] = {'role': Role.SYSTEM, 'content': sys_prompt}
     memory['messages'] = msg
-    # analyze the tasks
-    task(full_content, prompt)
 
 
-# check if the length of messages exceeds 3k
+# check if the length of messages exceeds 5k
 def check_len(msg):
-    while len(str(msg)) > 3000:
+    while len(str(msg)) > 5000:
         msg.pop(1)
         msg.pop(1)
     return msg
@@ -528,9 +529,6 @@ def vl_chat(prompt):
     text_msg.append({'role': Role.USER, 'content': prompt})
     msg.append({'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
                                                {'text': prompt}]})
-    # check if the length of text messages exceeds 3k
-    text_msg = check_len(text_msg)
-    msg = check_len(msg)
     # get the reply from tongyi vl
     responses = MultiModalConversation.call(model='qwen-vl-plus', messages=msg, stream=True, incremental_output=True)
     full_content = ''  # with incrementally we need to merge output.
@@ -542,12 +540,11 @@ def vl_chat(prompt):
                 sep = re.split('[，：；。！？;!?\n]', chunk)
                 curr += sep[0]
                 if len(sep) > 1:
-                    print(curr)
-                    speak(curr)
+                    execute_task_async(curr, prompt)
                     if len(sep) > 2:
                         for phrase in sep[1:-1]:
                             if phrase != '':
-                                speak(phrase)
+                                execute_task_async(phrase, prompt)
                     curr = sep[-1]
                 full_content += chunk
             except:
@@ -560,31 +557,39 @@ def vl_chat(prompt):
             subprocess.run(["aplay", "recorded/no_response.wav"])
     # speak the last sentence
     if curr.strip() != '':
-        print(curr)
-        speak(curr)
+        execute_task_async(curr, prompt)
     print('Full response:\n' + full_content)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': [{'text': full_content}]})
     # load the reply to text message
     text_msg.append({'role': Role.ASSISTANT, 'content': full_content})
+    # check if the length of text messages exceeds 5k
+    text_msg = check_len(text_msg)
+    msg = check_len(msg)
     memory['vl'] = msg
     memory['messages'] = text_msg
-    task(full_content, prompt)
 
 
 # move to the point and introduce
 def map_point(num):
-    global next_round
     # update memory of position
     memory['position'] = num
     # send the message to navigation system
     subprocess.run(['python', 'navigation.py', str(num)])
-    next_round = False
+
+
+# execute tasks in a thread
+def execute_task_async(content, prompt):
+    print(content)
+    speak(content)
+    # Create a new thread for the task
+    task_thread = threading.Thread(target=task, args=(content, prompt))
+    task_thread.start()
+    task_thread.join()
 
 
 # execute the task in the reply
 def task(text, raw_prompt):
-    global next_round
     prompts = text.split('《《')
     # execute all task in prompts
     if len(prompts) > 1:
@@ -592,22 +597,18 @@ def task(text, raw_prompt):
         for prompt in prompts:
             # play rock paper scissor
             if '猜拳||开始' in prompt:
-                next_round = False
                 movement_queue('arm_control.py', '2')
             # lift right arm
             if '右臂||抬起' in prompt:
                 movement_queue('arm_control.py', '2')
             # play music
             if '音乐||开始' in prompt:
-                next_round = False
                 # stop all sound
                 subprocess.run(['pkill', '-9', 'aplay'])
                 # play music
                 subprocess.run(['aplay', 'recorded/taiji.wav'])
             # play taichi
             if '太极||开始' in prompt:
-                # stop all sound
-                next_round = False
                 # do taichi
                 movement_queue('arm_control.py', '3')
                 # play music
@@ -621,22 +622,20 @@ def task(text, raw_prompt):
                     march(prompt)
             # face recognition
             if '人脸识别||开始' in prompt:
-                next_round = False
                 face_search = face()
                 if face_search:
-                    chat(prompt=face_search, personnel=False)
+                    chat(prompt=face_search, personnel=False, electricity=False)
                 else:
                     subprocess.run(['aplay', 'recorded/no_face.wav'])
             # stop all the task
             if '任务||停止' in prompt:
-                next_round = False
                 # stop arm movement
                 subprocess.run(['python', 'arm_control.py', '6'])
                 # stop the game
                 subprocess.run(['python', 'game.py', '2'])
             if '正在定位' in prompt:
                 # move to designated point in the exhibition hall
-                target = prompt.split('||')[1].split("》》")[0]
+                target = prompt.split('|')[-1]
                 print(target)
                 if '原' in target:
                     map_point(601)
@@ -683,7 +682,7 @@ def task(text, raw_prompt):
                 vl_chat(raw_prompt)
 
 
-def dialog_flow() -> None:
+def dialog() -> None:
     """
     Manage the dialog process
     """
@@ -707,8 +706,9 @@ def dialog_flow() -> None:
         # 如果是中文，去掉所有空格，仅用于关键词判断
         prompt = raw_prompt.replace(' ', '')
 
-        # Disable RAG for personnel search
+        # Disable RAG
         personnel = False
+        electricity = False
 
         # Check if the input contains stop keywords and handle accordingly
         if contains_keywords(prompt, [['停止', '结束'], ['移动', '表演', '游戏', '任务']]):
@@ -744,6 +744,11 @@ def dialog_flow() -> None:
             raw_prompt = prompt
             subprocess.run(["aplay", f"recorded/personnel_mode.wav"])  # play the sound of "search for personnel"
 
+        # Turn on personnel mode with RAG
+        elif contains_keywords(prompt, [['电力'], '模式']):
+            electricity = True  # Enable RAG for personnel search
+            raw_prompt = prompt
+
         # Introduce "Shenhao" immediately, bypassing LLM
         elif contains_keywords(prompt, ['申昊', '介绍']):
             respond = False
@@ -755,13 +760,7 @@ def dialog_flow() -> None:
 
         # Send preprocessed prompt to LLM
         if respond and prompt:
-            chat(prompt=raw_prompt, personnel=personnel)
-
-
-# keep listening for the next round of dialog
-def dialog():
-    while next_round:
-        dialog_flow()
+            chat(prompt=raw_prompt, personnel=personnel, electricity=electricity)
 
 
 # stop the dialog process
