@@ -1,7 +1,7 @@
 # Xiaohao: Embodied Intelligence Project
 
 ## Project Overview
-Welcome to the GitHub repository of Xiaohao, an embodied intelligence system designed by Shenhao. Xiaohao is a humanoid robot equipped with multi-agent systems. This project integrates a large language model and a vision language model at its core, supported by robotic arms, mobility wheels, and a camera. These components communicate via ROS messages, allowing Xiaohao to respond to user prompts, make decisions, and interact with its environment.<br>
+Welcome to the GitHub repository of Xiaohao, an embodied intelligence system designed by Shenhao. Xiaohao is a humanoid robot designed as a guide in the exhibition hall. This project integrates a large language model and a vision language model at its core, supported by robotic arms, mobility wheels, and a camera. These components communicate via ROS messages, allowing Xiaohao to respond to user prompts, make decisions, and interact with its environment.<br>
 
 In this repository, you will find the open-sourced code for the large language model and the camera, as well as the ROS publisher nodes responsible for orchestrating communications among the different components.
 
