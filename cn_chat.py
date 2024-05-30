@@ -41,7 +41,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
 print(dashscope.api_key)
 callback = Callback()
-# initialize speech recognition model with hot words
+# initialize speech recognition model with hot word
 with open('hotword.txt', 'r', encoding='utf-8') as f:
     hotword = f.readline()
 paraformer = pipeline(task=Tasks.auto_speech_recognition,
@@ -479,7 +479,7 @@ def chat(prompt, personnel=False, electricity=False):
     msg = check_len(msg)
     # Use language generation model to generate a response
     responses = Generation.call(
-        Generation.Models.qwen_turbo,
+        model='qwen-plus',
         messages=msg,
         seed=randint(1, 100),
         enable_search=web,
@@ -532,9 +532,9 @@ def vl_chat(prompt):
     text_msg = memory['messages']
     text_msg.append({'role': Role.USER, 'content': prompt})
     msg.append({'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
-                                               {'text': prompt}]})
+                                               {'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
     # get the reply from tongyi vl
-    responses = MultiModalConversation.call(model='qwen-vl-plus', messages=msg, stream=True, incremental_output=True)
+    responses = MultiModalConversation.call(model='qwen-vl-max', messages=msg, stream=True, incremental_output=True)
     full_content = stream_tts(responses, prompt, vl=True)
     # load the reply to the message
     msg.append({'role': Role.ASSISTANT, 'content': [{'text': full_content}]})
@@ -545,6 +545,8 @@ def vl_chat(prompt):
     msg = check_len(msg)
     memory['vl'] = msg
     memory['messages'] = text_msg
+    # end the process
+    terminate()
 
 
 # move to the point and introduce
@@ -574,20 +576,29 @@ def task(text, raw_prompt):
     if len(prompts) > 1:
         prompts = prompts[1:]
         for prompt in prompts:
-            # play rock paper scissor
-            if '猜拳||开始' in prompt:
+            # if the task requires vision, use VL to chat
+            if '拍照' in prompt:
+                vl_chat(raw_prompt)
+            # play rock paper scissor or lift right arm
+            if '猜拳' in prompt or '抬起' in prompt:
                 movement_queue('arm_control.py', '2')
-            # lift right arm
-            if '右臂||抬起' in prompt:
-                movement_queue('arm_control.py', '2')
+            # wave hands
+            if '挥手' in prompt or '招手' in prompt:
+                movement_queue('arm_control.py', '4')
+            # respect gesture
+            if '抱拳' in prompt:
+                movement_queue('arm_control.py', '7')
+            # thumps up
+            if '点赞' in prompt:
+                movement_queue('arm_control.py', '10')
             # play music
-            if '音乐||开始' in prompt:
+            if '音乐' in prompt:
                 # stop all sound
                 subprocess.run(['pkill', '-9', 'aplay'])
                 # play music
                 subprocess.run(['aplay', 'recorded/taiji.wav'])
             # play taichi
-            if '太极||开始' in prompt:
+            if '太极' in prompt:
                 # do taichi
                 movement_queue('arm_control.py', '3')
                 # play music
@@ -600,19 +611,19 @@ def task(text, raw_prompt):
                 elif contains_keywords(prompt, [['前', '后', '左', '右']]):
                     march(prompt)
             # face recognition
-            if '人脸识别||开始' in prompt:
+            if '人脸识别' in prompt:
                 face_search = face()
                 if face_search:
                     chat(prompt=face_search, personnel=False, electricity=False)
                 else:
                     subprocess.run(['aplay', 'recorded/no_face.wav'])
             # stop all the task
-            if '任务||停止' in prompt:
+            if '停止' in prompt:
                 # stop arm movement
                 subprocess.run(['python', 'arm_control.py', '6'])
                 # stop the game
                 subprocess.run(['python', 'game.py', '2'])
-            if '正在定位' in prompt:
+            if '定位' in prompt:
                 # move to designated point in the exhibition hall
                 target = prompt.split('|')[-1]
                 print(target)
@@ -656,9 +667,7 @@ def task(text, raw_prompt):
                     map_point(44)
                 else:
                     locate(target, 0)
-            # if the task requires vision, use VL to chat
-            if '拍照' in prompt or '环视' in prompt:
-                vl_chat(raw_prompt)
+
 
 
 def dialog() -> None:
