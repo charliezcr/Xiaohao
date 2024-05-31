@@ -32,9 +32,6 @@ from tts_cloud import Callback
 import numpy as np
 import torch
 
-os.environ['DASHSCOPE_API_KEY'] = 'sk-2a3454a674d94ef49e391da8ca868e4d'
-os.environ['DASHVECTOR_API_KEY'] = 'sk-jZ00txztmfCQwBUSRXRO1329sH5Uz709C961AAACA11EE9AF68E44DE4FB961'
-os.environ['DASHVECTOR_ENDPOINT'] = 'vrs-cn-nwy3mdv5400022.dashvector.cn-hangzhou.aliyuncs.com'
 ########################################################################
 # initialization
 ########################################################################
