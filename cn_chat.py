@@ -59,8 +59,8 @@ with open('vl_prompt.txt', 'r', encoding='utf-8') as f:
 memory = Manager().dict()
 memory['messages'] = [{'role': Role.SYSTEM, 'content': sys_prompt}]  # LLM's memory
 memory['vl'] = [{'role': Role.SYSTEM, 'content': [{'text': vl_sys_prompt}]}]  # VL's memory
-memory['arm_control'] = []  # arm's memory
-memory['move_ros'] = []  # wheel's memory
+memory['arm_control'] = (0, 0)  # arm's memory
+memory['direction'] = (0, 0)  # wheel's memory
 memory['position'] = 601
 # initialize VAD
 vad = VoiceActivityDetection()
@@ -189,7 +189,7 @@ def listen():
 # face recognition
 def face():
     # take a photo
-    subprocess.run(['rostopic', 'pub', '/camera std_msgs/String', '"jpg"'])
+    subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', '"jpg"'])
     subprocess.run(["aplay", "recorded/snap.wav"])
     result = False
     try:
@@ -313,7 +313,7 @@ def stream_tts(responses, prompt, vl=False):
 def turn(prompt):
     if '前' in prompt or '后' in prompt:
         # If the command contains '前' (forward) or '后' (backward), turn left 180 degrees.
-        movement_queue('move_ros', 'left_180_degree')
+        movement_queue('direction', 'left_180_degree')
     else:
         # set the direction for left and right
         if '右' in prompt:
@@ -330,11 +330,11 @@ def turn(prompt):
             if len(number) == 0:
                 # If no numeric value is found, turn the robot 90 degrees in the specified direction.
                 argument = f'{direction}90_degree'
-                movement_queue('move_ros', argument)
+                movement_queue('direction', argument)
             elif len(number) == 1:
                 # Execute a system command to turn the robot using 'move_ros' with the specified direction and numeric angle.
                 argument = f'{direction}{str(number[0])}_degree'
-                movement_queue('move_ros', argument)
+                movement_queue('direction', argument)
             else:
                 subprocess.run(["aplay", "recorded/no_movement.wav"])
         else:
@@ -349,11 +349,11 @@ def march(prompt):
     elif '后' in prompt:
         direction = 'backward_'
     elif '左' in prompt:
-        movement_queue('move_ros', 'left_90_degree')
+        movement_queue('direction', 'left_90_degree')
         time.sleep(7)
         direction = 'forward_'
     elif '右' in prompt:
-        movement_queue('move_ros', 'right_90_degree')
+        movement_queue('direction', 'right_90_degree')
         time.sleep(7)
         direction = 'forward_'
     else:
@@ -365,20 +365,19 @@ def march(prompt):
         if len(number) == 0:
             # If no numeric value is found, move the robot 0.3 meters in the specified direction.
             argument = f'{direction}0.3_m'
-            movement_queue('move_ros', argument)
+            movement_queue('direction', argument)
         elif len(number) > 1:
             # If multiple numeric values are found, play a sound to indicate an issue.
             subprocess.run(["aplay", "recorded/no_movement.wav"])
         else:
-            # Execute a system command to move the robot using 'move_ros' with the specified direction and distance.
+            # Execute a system command to move the robot using 'direction' with the specified direction and distance.
             argument = f'{direction}{str(number[0])}_m'
-            movement_queue('move_ros', argument)
+            movement_queue('direction', argument)
 
 
 # Use vision language model to locate the item
 def locate(item, round):
     # take a photo
-    subprocess.run(['rostopic', 'pub', '/camera std_msgs/String', '"png"'])
     subprocess.run(["aplay", "recorded/snap.wav"])
     msg = [{'role': Role.SYSTEM, 'content': [{
         'text': "你的任务是做目标检测，每次我将输入一个需要你识别的物体，请你返回box框和坐标。如果你不能找到该物体，请直接回复：《《未找到》》"}]},
@@ -397,63 +396,64 @@ def locate(item, round):
         x = int((x1 + x2) * 640 / 2000)
         y = int((y1 + y2) * 480 / 2000)
         argument = f'locate:{x}:{y}'
-        subprocess.run(['rostopic', 'pub', '/camera std_msgs/String', argument])
+        subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', argument])
     except:
         if round > 5:
             subprocess.run(["aplay", "recorded/not_found.wav"])
         else:
             subprocess.run(["aplay", "recorded/not_found_turn.wav"])
-            movement_queue('move_ros', 'left_45_degree')
+            movement_queue('direction', 'left_45_degree')
             time.sleep(1)
             locate(item, round + 1)
 
 
 # save the movement in the memory and execute the task
 def movement_queue(topic, code):
-    type = 'Int8'
-    queue = memory[topic]
+    type = 'String' if topic == 'direction' else 'Int8'
+    last_action = memory[topic]
     threshold = timedelta(seconds=0)
-    if len(queue) > 0:
-        task, start_time = queue[-1]
+    if last_action[0] != 0:
+        task, start_time = last_action
         print(f'last task{task}, executed at {start_time}')
         # arm
         if topic == 'arm_control':
             # taichi
             if task == '3':
                 threshold = timedelta(seconds=68)
-            # lift arm
-            if task == '2':
-                threshold = timedelta(seconds=3)
+            elif task == '4':
+                threshold = timedelta(seconds=9)
+            elif task == '7':
+                threshold = timedelta(seconds=12)
+            elif task == '10':
+                threshold = timedelta(seconds=12)
         # wheel
-        elif topic == 'move_ros':
-            type = 'String'
+        elif topic == 'direction':
             code_list = task.split('_')
             move = code_list[2]
-            amount = code_list[1]
+            amount = float(code_list[1])
             # turn
             if move.endswith('degree'):
-                t = int(amount / 10)
-                threshold = timedelta(seconds=t)
+                threshold = timedelta(seconds=int(amount / 10))
             # march
             if move.endswith('m'):
-                t = int(amount / 0.1)
-                threshold = timedelta(seconds=t)
-        elif topic == 'move_ros':
-            type = 'String'
+                threshold = timedelta(seconds=int(amount / 0.1))
+
         # check whether the last movement is done
         now = datetime.now()
         end_time = start_time + threshold
+        print(end_time)
         # if the last task did not end, wait
         if end_time > now:
-            wait_time = (now - end_time).seconds + 1
+            wait_time = (end_time - now).seconds + 1
             print(f'wait for {wait_time}s')
             time.sleep(wait_time)
     # add to memory
-    memory[topic].append((code, datetime.now()))
+    memory[topic] = (code, datetime.now())
+    print(memory[topic])
     # execute the task
-    subprocess.run(['rostopic', 'pub', f'/{topic} std_msgs/{type}', code])
     if topic == 'arm_control' and code == '3':
         subprocess.Popen(['aplay', 'recorded/taiji.wav'])
+    subprocess.run(['rostopic', 'pub', '-1', f'/{topic}', f'std_msgs/{type}', code])
 
 
 ########################################################################
@@ -528,14 +528,15 @@ def contains_keywords(prompt, keywords):
 # chat with vision language model
 def vl_chat(prompt):
     # take a photo
-    subprocess.run(['rostopic', 'pub', '/camera std_msgs/String', '"png"'])
+    subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', '"png"'])
     subprocess.run(["aplay", "recorded/snap.wav"])
     # load the prompt to the message
     msg = memory['vl']
     text_msg = memory['messages']
     text_msg.append({'role': Role.USER, 'content': prompt})
     msg.append({'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
-                                               {'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
+                                               {
+                                                   'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
     # get the reply from tongyi vl
     responses = MultiModalConversation.call(model='qwen-vl-max', messages=msg, stream=True, incremental_output=True)
     full_content = stream_tts(responses, prompt, vl=True)
@@ -557,7 +558,7 @@ def map_point(num):
     # update memory of position
     memory['position'] = num
     # send the message to navigation system
-    subprocess.run(f'rostopic pub /navigation_cmd std_msgs/String "data: \'pass 0 {str(num)}\'"', shell=True)
+    os.system(f'rostopic pub -1 /navigation_cmd std_msgs/String "data: \'pass 0 {str(num)}\'"')
 
 
 # execute tasks in a thread
@@ -623,9 +624,9 @@ def task(text, raw_prompt):
             # stop all the task
             if '停止' in prompt:
                 # stop arm movement
-                subprocess.run(['rostopic', 'pub', '/arm_control std_msgs/Int8', '6'])
+                subprocess.run(['rostopic', 'pub', '-1', '/arm_control', 'std_msgs/Int8', '6'])
                 # stop the game
-                subprocess.run(['rostopic', 'pub', '/game std_msgs/Int8', '2'])
+                subprocess.run(['rostopic', 'pub', '-1', '/game', 'std_msgs/Int8', '2'])
             if '定位' in prompt:
                 # move to designated point in the exhibition hall
                 target = prompt.split('|')[-1]
@@ -704,9 +705,9 @@ def dialog() -> None:
         if contains_keywords(prompt, [['停止', '结束'], ['移动', '表演', '游戏', '任务']]):
             respond = False  # Shut the LLM up
             # Stop a game
-            subprocess.run(['rostopic', 'pub', '/game std_msgs/Int8', '2'])
+            subprocess.run(['rostopic', 'pub', '-1', '/game', 'std_msgs/Int8', '2'])
             # Stop arm movement
-            subprocess.run(['rostopic', 'pub', '/arm_control std_msgs/Int8', '6'])
+            subprocess.run(['rostopic', 'pub', '-1', '/arm_control', 'std_msgs/Int8', '6'])
 
         # Activate face recognition
         elif '脸识别' in prompt:
@@ -727,8 +728,7 @@ def dialog() -> None:
 
         # go back to the original position
         elif contains_keywords(prompt, ['回', '原']):
-            memory['position'] = 601
-            subprocess.run('rostopic pub /navigation_cmd std_msgs/String "data: \'pass 0 601\'"', shell=True)
+            map_point(601)
 
         # Turn on personnel mode with RAG
         elif contains_keywords(prompt, [['人员', '员工'], '模式']):
