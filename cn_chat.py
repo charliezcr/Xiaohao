@@ -51,9 +51,9 @@ dialog_proc = None
 # initialize face recognition model
 retina = pipeline("face_recognition", model='./model/cv_retinafce_recognition', model_revision='v2.0.2')
 # load the system prompts
-with open('prompt.txt', 'r', encoding='utf-8') as f:
+with open('llm_prompt.md', 'r', encoding='utf-8') as f:
     sys_prompt = f.read()
-with open('vl_prompt.txt', 'r', encoding='utf-8') as f:
+with open('vl_prompt.md', 'r', encoding='utf-8') as f:
     vl_sys_prompt = f.read()
 # initialize the memory
 memory = Manager().dict()
@@ -425,7 +425,7 @@ def movement_queue(topic, code):
             elif task == '7':
                 threshold = timedelta(seconds=12)
             elif task == '10':
-                threshold = timedelta(seconds=12)
+                threshold = timedelta(seconds=7)
         # wheel
         elif topic == 'direction':
             code_list = task.split('_')
