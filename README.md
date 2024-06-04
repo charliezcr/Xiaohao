@@ -11,8 +11,8 @@ In this repository, you will find the open-sourced code for the large language m
      - **[vad.py](https://github.com/charliezcr/Xiaohao/blob/main/vad.py):** Voice activity detection function utilized in cn_chat.py.<br>
      - **[silero_vad.onnx](https://github.com/charliezcr/Xiaohao/blob/main/silero_vad.onnx):** Open-source VAD model used throughout the project.<br>
      - **[tts_cloud.py](https://github.com/charliezcr/Xiaohao/blob/main/tts_cloud.py):** Text-to-speech function used in cn_chat.py.<br>
-     - **[prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/prompt.txt):** System prompt for the large language model.<br>
-     - **[vl_prompt.txt](https://github.com/charliezcr/Xiaohao/blob/main/vl_prompt.txt):** System prompt for the vision language model.
+     - **[llm_prompt.md](https://github.com/charliezcr/Xiaohao/blob/main/llm_prompt.md):** System prompt for the large language model.<br>
+     - **[vl_prompt.md](https://github.com/charliezcr/Xiaohao/blob/main/vl_prompt.md):** System prompt for the vision language model.
 
 2. **Camera and Vision Processing:**
    - **[rs_cam.py](https://github.com/charliezcr/Xiaohao/blob/main/rs_cam.py):** This node manages the Intel® RealSense™ Stereo depth camera. It subscribes to the 'camera' topic and, upon receiving commands, captures color and depth images, identifies objects, and communicates with mobility components to navigate towards them.
