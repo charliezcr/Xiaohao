@@ -6,7 +6,6 @@ import cv2
 import mmap
 import rospy
 from std_msgs.msg import String
-import time
 
 # 打开共享内存
 shm_fd = os.open('/dev/shm/camera_6', os.O_CREAT | os.O_TRUNC | os.O_RDWR)
@@ -42,9 +41,8 @@ def callback(data):
         # calculate the angle to turn
         angle_offset_x = np.arctan2(camera_coordinate[0], camera_coordinate[2])
         angle_offset_x_deg = int(np.abs(np.degrees(angle_offset_x)))
-        turn = 'python /home/robot/shoushi_detect/move_ros.py ' + direction + str(angle_offset_x_deg) + '_degree'
+        turn = 'rostopic pub -1 /direction std_msgs/String ' + direction + str(angle_offset_x_deg) + '_degree'
         os.system(turn)
-        time.sleep(1)
         # calculate the distance to move
         hypotenuse = np.sqrt(camera_coordinate[0]**2 + camera_coordinate[2]**2)
         distance = round(hypotenuse, 2)
@@ -55,7 +53,7 @@ def callback(data):
         else:
             distance *= 0.8
         # move
-        march = 'python /home/robot/shoushi_detect/move_ros.py forward_' + str(distance) + '_m'
+        march = 'rostopic pub -1 /direction std_msgs/String forward_' + str(distance) + '_m'
         print(march)
         os.system(march)
 
