@@ -27,10 +27,12 @@ from dashvector import Client
 from modelscope.outputs import OutputKeys
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, String
 from tts_cloud import Callback
 import numpy as np
 import torch
+import mmap
+import cv2
 
 ########################################################################
 # initialization
@@ -64,6 +66,9 @@ memory['direction'] = (0, 0)  # wheel's memory
 memory['position'] = 601
 # initialize VAD
 vad = VoiceActivityDetection()
+# initialize camera
+fd = os.open('/dev/shm/camera_7', os.O_RDONLY)
+mmap_data = mmap.mmap(fd, length=640 * 480 * 3, access=mmap.ACCESS_READ)
 # done with initialization play start voice
 subprocess.run(["aplay", "recorded/start.wav"])
 
@@ -189,12 +194,12 @@ def listen():
 # face recognition
 def face():
     # take a photo
-    subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', '"jpg"'])
-    subprocess.run(["aplay", "recorded/snap.wav"])
+    photo_name = '/home/robot/chatbot/image/face.jpg'
+    snap(photo_name)
     result = False
     try:
         # generate embedding for face detected
-        embedding = retina(dict(user='../shoushi_detect/image/color_image.jpg'))[OutputKeys.IMG_EMBEDDING].tolist()[0]
+        embedding = retina(dict(user=photo_name))[OutputKeys.IMG_EMBEDDING].tolist()[0]
         # search the embedding in vector database
         result = search_relevant_doc(embedding, 'photo', 1)
         # if the face is found, chat with this person with personalized topics
@@ -375,13 +380,21 @@ def march(prompt):
             movement_queue('direction', argument)
 
 
+# Take a photo
+def snap(photo_name):
+    frame = np.frombuffer(mmap_data, dtype=np.uint8).reshape((480, 640, 3))
+    cv2.imwrite(photo_name, frame)
+    subprocess.run(["aplay", "recorded/snap.wav"])
+
+
 # Use vision language model to locate the item
 def locate(item, round):
     # take a photo
-    subprocess.run(["aplay", "recorded/snap.wav"])
+    photo_name = '/home/robot/chatbot/image/color_image.png'
+    snap(photo_name)
     msg = [{'role': Role.SYSTEM, 'content': [{
         'text': "你的任务是做目标检测，每次我将输入一个需要你识别的物体，请你返回box框和坐标。如果你不能找到该物体，请直接回复：《《未找到》》"}]},
-           {'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
+           {'role': Role.USER, 'content': [{'image': 'file://' + photo_name},
                                            {'text': f"请在图中框出{item}"}]}]
     response = MultiModalConversation.call(model='qwen-vl-plus', messages=msg)
     print(response)
@@ -397,6 +410,7 @@ def locate(item, round):
         y = int((y1 + y2) * 480 / 2000)
         argument = f'locate:{x}:{y}'
         subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', argument])
+        rospy.loginfo("/camera locate %s" % rospy.get_time())
     except:
         if round > 5:
             subprocess.run(["aplay", "recorded/not_found.wav"])
@@ -454,6 +468,7 @@ def movement_queue(topic, code):
     if topic == 'arm_control' and code == '3':
         subprocess.Popen(['aplay', 'recorded/taiji.wav'])
     subprocess.run(['rostopic', 'pub', '-1', f'/{topic}', f'std_msgs/{type}', code])
+    rospy.loginfo(f"/{topic} {code} %s" % rospy.get_time())
 
 
 ########################################################################
@@ -528,13 +543,13 @@ def contains_keywords(prompt, keywords):
 # chat with vision language model
 def vl_chat(prompt):
     # take a photo
-    subprocess.run(['rostopic', 'pub', '-1', '/camera', 'std_msgs/String', '"png"'])
-    subprocess.run(["aplay", "recorded/snap.wav"])
+    photo_name = '/home/robot/chatbot/image/color_image.png'
+    snap(photo_name)
     # load the prompt to the message
     msg = memory['vl']
     text_msg = memory['messages']
     text_msg.append({'role': Role.USER, 'content': prompt})
-    msg.append({'role': Role.USER, 'content': [{'image': 'file:///home/robot/shoushi_detect/image/color_image.png'},
+    msg.append({'role': Role.USER, 'content': [{'image': 'file://' + photo_name},
                                                {
                                                    'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
     # get the reply from tongyi vl
@@ -558,6 +573,7 @@ def map_point(num):
     # update memory of position
     memory['position'] = num
     # send the message to navigation system
+    rospy.loginfo(f"/navigation_cmd {str(num)} %s" % rospy.get_time())
     os.system(f'rostopic pub -1 /navigation_cmd std_msgs/String "data: \'pass 0 {str(num)}\'"')
 
 
@@ -625,8 +641,10 @@ def task(text, raw_prompt):
             if '停止' in prompt:
                 # stop arm movement
                 subprocess.run(['rostopic', 'pub', '-1', '/arm_control', 'std_msgs/Int8', '6'])
+                rospy.loginfo('/arm_control 6 %s' % rospy.get_time())
                 # stop the game
                 subprocess.run(['rostopic', 'pub', '-1', '/game', 'std_msgs/Int8', '2'])
+                rospy.loginfo('/game 2 %s' % rospy.get_time())
             if '定位' in prompt:
                 # move to designated point in the exhibition hall
                 target = prompt.split('|')[-1]
@@ -706,8 +724,10 @@ def dialog() -> None:
             respond = False  # Shut the LLM up
             # Stop a game
             subprocess.run(['rostopic', 'pub', '-1', '/game', 'std_msgs/Int8', '2'])
+            rospy.loginfo('/game 2 %s' % rospy.get_time())
             # Stop arm movement
             subprocess.run(['rostopic', 'pub', '-1', '/arm_control', 'std_msgs/Int8', '6'])
+            rospy.loginfo('/arm_control 6 %s' % rospy.get_time())
 
         # Activate face recognition
         elif '脸识别' in prompt:
@@ -823,10 +843,7 @@ def wake_callback(ros_msg) -> None:
         movement_queue('arm_control', '3')
 
 
-def subscriber() -> None:
-    """
-    Initializes a ROS node for wake-up signal subscription and starts the ROS event loop.
-    """
+def ros_node():
     # Initialize a ROS node with the name 'wake_subscriber'
     rospy.init_node('wake_subscriber')
     # Subscribe to the 'wake' topic, expecting messages of type Int32, and specify the callback function
@@ -836,6 +853,6 @@ def subscriber() -> None:
 
 
 if __name__ == '__main__':
-    subscriber()
+    ros_node()
     dialog_proc = Process(target=dialog)
     dialog_proc.start()

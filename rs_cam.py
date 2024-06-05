@@ -1,26 +1,17 @@
-# coding=utf-8
 import pyrealsense2 as rs
 import numpy as np
 import os
 import cv2
 import mmap
 import rospy
-from std_msgs.msg import String
+from std_msgs.msg import String, Int8
 
-# 打开共享内存
 shm_fd = os.open('/dev/shm/camera_6', os.O_CREAT | os.O_TRUNC | os.O_RDWR)
 shm_fd2 = os.open('/dev/shm/camera_7', os.O_CREAT | os.O_TRUNC | os.O_RDWR)
 
 
 def callback(data):
-    global align
-    # save a png file
-    if data.data == 'png':
-        print(color_image.shape)
-        cv2.imwrite("/home/robot/shoushi_detect/image/color_image.png", color_image)
-    # save a jpg file
-    if data.data == 'jpg':
-        cv2.imwrite("/home/robot/shoushi_detect/image/color_image.jpg", color_image)
+    global align, pub_direction, rate
     # locate item and move towards it
     if data.data.startswith('locate'):
         # get the 2d coordinates
@@ -29,7 +20,7 @@ def callback(data):
         y = int(coord[1])
         aligned_frames = align.process(frames)  # get aligned frames
         aligned_depth_frame = aligned_frames.get_depth_frame()  # get depth frame
-        dis = aligned_depth_frame.get_distance(x, y)  # （x, y)点的真实深度值
+        dis = aligned_depth_frame.get_distance(x, y)
         depth_intrin = aligned_depth_frame.profile.as_video_stream_profile().intrinsics
         # get 3D coordinates
         camera_coordinate = rs.rs2_deproject_pixel_to_point(depth_intrin, [x, y], dis)
@@ -41,10 +32,13 @@ def callback(data):
         # calculate the angle to turn
         angle_offset_x = np.arctan2(camera_coordinate[0], camera_coordinate[2])
         angle_offset_x_deg = int(np.abs(np.degrees(angle_offset_x)))
-        turn = 'rostopic pub -1 /direction std_msgs/String ' + direction + str(angle_offset_x_deg) + '_degree'
-        os.system(turn)
+        turn_msg = direction + str(angle_offset_x_deg) + '_degree'
+        print(turn_msg)
+        pub_direction.publish(turn_msg)
+        rate.sleep()
+        rate.sleep()
         # calculate the distance to move
-        hypotenuse = np.sqrt(camera_coordinate[0]**2 + camera_coordinate[2]**2)
+        hypotenuse = np.sqrt(camera_coordinate[0] ** 2 + camera_coordinate[2] ** 2)
         distance = round(hypotenuse, 2)
         if distance > 1.2:
             distance -= 0.4
@@ -53,9 +47,10 @@ def callback(data):
         else:
             distance *= 0.8
         # move
-        march = 'rostopic pub -1 /direction std_msgs/String forward_' + str(distance) + '_m'
-        print(march)
-        os.system(march)
+        march_msg = 'forward_' + str(distance) + '_m'
+        print(march_msg)
+        pub_direction.publish(march_msg)
+        rate.sleep()
 
 
 if __name__ == "__main__":
@@ -66,9 +61,11 @@ if __name__ == "__main__":
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)
     # Start streaming
     pipeline.start(config)
-    align_to = rs.stream.color  # 与color流对齐
+    align_to = rs.stream.color
     align = rs.align(align_to)
     rospy.init_node('realsense_camera_subscriber', anonymous=True)
+    pub_direction = rospy.Publisher('/direction', String, queue_size=10)
+    rate = rospy.Rate(1)
     rospy.Subscriber("camera", String, callback)
 
     try:
@@ -92,10 +89,8 @@ if __name__ == "__main__":
             depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
             images = np.hstack((color_image, depth_colormap))
             images = cv2.flip(images, -1)
-            # 深度图
             mmap_data.seek(0)
             mmap_data.write(depth_image.astype(np.uint16).tobytes())
-            # 彩色图
             mmap_data2.seek(0)
             mmap_data2.write(color_image.tobytes())
         rospy.spin()
