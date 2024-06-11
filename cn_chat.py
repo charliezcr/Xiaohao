@@ -287,7 +287,10 @@ def stream_tts(responses, prompt, vl=False):
             chunk = response.output.choices[0]['message']['content']
             # get text fot vl chat
             if vl:
-                chunk = chunk[0]['text']
+                try:
+                    chunk = chunk[0]['text']
+                except:
+                    pass
             sep = re.split('[，：；。！？;!?\n]', chunk)
             curr += sep[0]
             if len(sep) > 1:
@@ -649,7 +652,7 @@ def task(text, raw_prompt):
                 # move to designated point in the exhibition hall
                 target = prompt.split('|')[-1]
                 print(target)
-                if '原' in target:
+                if contains_keywords(target, [['原', '袁']]):
                     map_point(601)
                 elif '待客' in target:
                     map_point(0)
@@ -747,7 +750,7 @@ def dialog() -> None:
             raw_prompt = f'请根据以下信息：{weather()}，回答问题：{prompt}'
 
         # go back to the original position
-        elif contains_keywords(prompt, ['回', '原']):
+        elif contains_keywords(prompt, ['回', ['原', '袁']]):
             map_point(601)
 
         # Turn on personnel mode with RAG
