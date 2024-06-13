@@ -34,6 +34,7 @@ import torch
 import mmap
 import cv2
 
+
 ########################################################################
 # initialization
 ########################################################################
@@ -287,10 +288,11 @@ def stream_tts(responses, prompt, vl=False):
             chunk = response.output.choices[0]['message']['content']
             # get text fot vl chat
             if vl:
+                print(chunk)
                 try:
                     chunk = chunk[0]['text']
                 except:
-                    pass
+                    chunk = ' '
             sep = re.split('[，：；。！？;!?\n]', chunk)
             curr += sep[0]
             if len(sep) > 1:
@@ -600,13 +602,16 @@ def task(text, raw_prompt):
         prompts = prompts[1:]
         for prompt in prompts:
             # if the task requires vision, use VL to chat
-            if '拍照' in prompt:
+            if contains_keywords(prompt, [['拍照', '检测']]):
                 vl_chat(raw_prompt)
-            # play rock paper scissor or lift right arm
-            if '猜拳' in prompt or '抬起' in prompt:
+            # play rock paper scissor
+            if '猜拳' in prompt:
+                movement_queue('arm_control', '2')
+            # lift right arm
+            if contains_keywords(prompt, [['起', '握'], ['手', '臂']]):
                 movement_queue('arm_control', '2')
             # wave hands
-            if '挥手' in prompt or '招手' in prompt:
+            if contains_keywords(prompt, [['挥', '招']]):
                 movement_queue('arm_control', '4')
             # respect gesture
             if '抱拳' in prompt:
@@ -648,7 +653,7 @@ def task(text, raw_prompt):
                 # stop the game
                 subprocess.run(['rostopic', 'pub', '-1', '/game', 'std_msgs/Int8', '2'])
                 rospy.loginfo('/game 2 %s' % rospy.get_time())
-            if '定位' in prompt:
+            if contains_keywords(prompt, [['定位', '搜', '找', '识别', '移动'], '|']):
                 # move to designated point in the exhibition hall
                 target = prompt.split('|')[-1]
                 print(target)
