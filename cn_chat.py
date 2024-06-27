@@ -27,28 +27,29 @@ from dashvector import Client
 from modelscope.outputs import OutputKeys
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
-from std_msgs.msg import Int32, String
+from std_msgs.msg import Int32, Int8, String
 from tts_cloud import Callback
 import numpy as np
 import torch
 import mmap
 import cv2
 
-
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 ########################################################################
 # initialization
 ########################################################################
 # connect to dashscope
 ssl._create_default_https_context = ssl._create_unverified_context
 dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
-print(dashscope.api_key)
 callback = Callback()
 # initialize speech recognition model with hot word
 with open('hotword.txt', 'r', encoding='utf-8') as f:
     hotword = f.readline()
 paraformer = pipeline(task=Tasks.auto_speech_recognition,
-                      model='./iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
-                      model_revision="v2.0.4")
+                      model='iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404',
+                      model_revision="v2.0.4",
+                      punc_model='iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
+                      punc_model_revision="v2.0.4")
 # start dialog process
 dialog_proc = None
 # initialize face recognition model
@@ -72,7 +73,6 @@ fd = os.open('/dev/shm/camera_7', os.O_RDONLY)
 mmap_data = mmap.mmap(fd, length=640 * 480 * 3, access=mmap.ACCESS_READ)
 # done with initialization play start voice
 subprocess.run(["aplay", "recorded/start.wav"])
-
 
 ########################################################################
 # recording audio
@@ -769,14 +769,13 @@ def dialog() -> None:
             electricity = True  # Enable RAG for personnel search
             raw_prompt = prompt
 
-        # Introduce "Shenhao" immediately, bypassing LLM
-        elif contains_keywords(prompt, ['申昊', '介绍']):
-            respond = False
-            subprocess.run(['aplay', 'recorded/shenhao_intro.wav'])  # play the introduction audio
+        # Introduce "Shenhao"
+        elif contains_keywords(raw_prompt, ['申昊', '介绍']):
+            respond = True
+            with open(f'shenhao.txt', 'r', encoding='utf-8') as f:
+                shenhao = f.read()
             # add the introduction text to memory
-            memory['messages'].append({'role': Role.USER, 'content': prompt})
-            memory['messages'].append({'role': Role.ASSISTANT,
-                                       'content': '杭州申昊科技股份有限公司（股票代码：300853）成立于2002年，是一家致力于设备检测及故障诊断的高新技术企业。通过充分利用传感器、机器人、人工智能及大数据分析技术，服务于工业大健康，为工业设备安全运行及智能化运维提供综合解决方案。目前，公司已开发了一系列具有自主知识产权的智能机器人及智能监测控制设备产品，可用于电力电网、轨道交通、油气化工等行业，解决客户的难点与痛点，为客户无人或少人值守和智能化管理提供有效的检测、监测手段。'})
+            raw_prompt = '请根据申昊科技的简介' + shenhao + '回答以下问题:' + raw_prompt
 
         # Send preprocessed prompt to LLM
         if respond and prompt:
@@ -843,6 +842,26 @@ def wake_callback(ros_msg) -> None:
             # play introduction audio
             subprocess.run(["aplay", f"position/{point}.wav"])
 
+    # Xiaohao nihao
+    if ros_msg.data == 3:
+        # stop the dialog
+        terminate()
+        # wave
+        send_msg = Int8()
+        send_msg.data = 4
+        pub.publish(send_msg)
+        rate.sleep()
+        memory['arm_control'] = ('4', datetime.now())
+        rospy.loginfo(f"/arm_control 4 %s" % rospy.get_time())
+        # play the greeting sound
+        subprocess.run(["aplay", f"recorded/hello.wav"])
+        # Start a new process for dialogue
+        dialog_proc = Process(target=dialog)
+        subprocess.run(["aplay", f"recorded/greet_2.wav"])
+        # start new conversation
+        dialog_proc.start()
+        rospy.loginfo("Starting a new dialog process")
+
     # perform taichi
     if ros_msg.data == 4:
         # stop all sound
@@ -856,6 +875,9 @@ def ros_node():
     rospy.init_node('wake_subscriber')
     # Subscribe to the 'wake' topic, expecting messages of type Int32, and specify the callback function
     rospy.Subscriber('wake', Int32, wake_callback)
+    global pub, rate
+    pub = rospy.Publisher('/arm_control', Int8, queue_size=10)
+    rate = rospy.Rate(10)
     # The spin() function keeps Python from exiting until this ROS node is stopped
     rospy.spin()
 
