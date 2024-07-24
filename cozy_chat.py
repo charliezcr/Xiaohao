@@ -34,8 +34,6 @@ import torch
 import mmap
 import cv2
 
-
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
 ########################################################################
 # initialization
 ########################################################################
@@ -49,9 +47,7 @@ with open('hotword.txt', 'r', encoding='utf-8') as f:
     hotword = f.readline()
 paraformer = pipeline(task=Tasks.auto_speech_recognition,
                       model='iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404',
-                      model_revision="v2.0.4",
-                      punc_model='iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
-                      punc_model_revision="v2.0.4")
+                      model_revision="v2.0.5")
 # start dialog process
 dialog_proc = None
 # initialize face recognition model
@@ -67,6 +63,8 @@ memory['messages'] = [{'role': Role.SYSTEM, 'content': sys_prompt}]  # LLM's mem
 memory['vl'] = [{'role': Role.SYSTEM, 'content': [{'text': vl_sys_prompt}]}]  # VL's memory
 memory['arm_control'] = (0, 0)  # arm's memory
 memory['direction'] = (0, 0)  # wheel's memory
+memory['head_action'] = (0, 0)  # head's memory
+memory['waist_action'] = (0, 0)  # waist's memory
 memory['position'] = 600
 # initialize VAD
 vad = VoiceActivityDetection()
@@ -455,6 +453,14 @@ def movement_queue(topic, code):
                 threshold = timedelta(seconds=9)
             elif task == '10':
                 threshold = timedelta(seconds=7)
+        # head
+        elif topic == 'head_action':
+            # nod
+            if task == '1':
+                threshold = timedelta(seconds=2)
+            # shake head
+            elif task == '2':
+                threshold = timedelta(seconds=5)
         # wheel
         elif topic == 'direction':
             code_list = task.split('_')
@@ -480,8 +486,11 @@ def movement_queue(topic, code):
     memory[topic] = (code, datetime.now())
     print(memory[topic])
     # execute the task
-    if topic == 'arm_control' and code == '3':
-        subprocess.Popen(['aplay', 'cozy_voice/taiji.wav'])
+    if topic == 'arm_control':
+        if memory['waist_action'][0] == '1':
+            movement_queue('waist_action', '2')
+        if code == '3':
+            subprocess.Popen(['aplay', 'cozy_voice/taiji.wav'])
     subprocess.run(['rostopic', 'pub', '-1', f'/{topic}', f'std_msgs/{type}', code])
     rospy.loginfo(f"/{topic} {code} %s" % rospy.get_time())
 
@@ -512,7 +521,7 @@ def chat(prompt, personnel=False, electricity=False):
     msg = check_len(msg)
     # Use language generation model to generate a response
     responses = Generation.call(
-        model='qwen-turbo',
+        model='qwen-plus',
         messages=msg,
         seed=randint(1, 100),
         enable_search=web,
@@ -565,7 +574,8 @@ def vl_chat(prompt):
     text_msg = memory['messages']
     text_msg.append({'role': Role.USER, 'content': prompt})
     msg.append({'role': Role.USER, 'content': [{'image': 'file://' + photo_name},
-                                               {'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
+                                               {
+                                                   'text': '这张照片显示你刚拍摄的眼前的真实环境。请你观察照片回答问题:' + prompt}]})
     # get the reply from tongyi vl
     responses = MultiModalConversation.call(model='qwen-vl-max', messages=msg, stream=True, incremental_output=True)
     full_content = stream_tts(responses, prompt, vl=True)
@@ -610,7 +620,7 @@ def task(action, raw_prompt):
     if contains_keywords(action, [['拍照', '检测']]) or 'photo' in action:
         vl_chat(raw_prompt)
     # play rock paper scissor
-    if contains_keywords(action, ['猜拳', 'scissor']):
+    if contains_keywords(action, [['猜拳', 'scissor']]):
         movement_queue('arm_control', '2')
     # lift right arm
     if contains_keywords(action, [['起', '握'], ['手', '臂']]) or 'shak' in action:
@@ -629,12 +639,23 @@ def task(action, raw_prompt):
         # stop all sound
         subprocess.run(['pkill', '-9', 'aplay'])
         # play music
-        subprocess.run(['aplay', 'cozy_voice/taiji.wav'])
+        subprocess.Popen(['aplay', 'cozy_voice/taiji.wav'])
     # play taichi
     if contains_keywords(action, [['太极', 'tai']]):
         # do taichi
         movement_queue('arm_control', '3')
-        # play music
+    # nod
+    if '点头' in action:
+        movement_queue('head_action', '1')
+    # shake head
+    if '摇头' in action:
+        movement_queue('head_action', '2')
+    # bow
+    if contains_keywords(action, ['腰', '弯']):
+        movement_queue('waist_action', '1')
+    # stand straight
+    if contains_keywords(action, [['直', '挺']]):
+        movement_queue('waist_action', '2')
     # move
     if '向' in action:
         # turn
@@ -676,7 +697,7 @@ def task(action, raw_prompt):
             map_point(12)
         elif '四足' in target:
             map_point(16)
-        elif contains_keywords(target, [['联合', '挂轨', '开关', '操作']]):
+        elif contains_keywords(target, [['联合', '挂轨', '开关', '操作', '电力', '电网']]):
             map_point(18)
         elif contains_keywords(target, [['变电站', '智能巡检']]):
             map_point(20)
@@ -694,9 +715,10 @@ def task(action, raw_prompt):
             map_point(32)
         elif contains_keywords(target, [['创新', '反馈', '电子皮肤', '无人机']]):
             map_point(34)
-        elif '防爆' in target:
+        elif contains_keywords(target, [['防爆', '油气', '化工']]):
+            print('go')
             map_point(38)
-        elif '环保' in target:
+        elif contains_keywords(target, [['应急', '环保']]):
             map_point(40)
         elif contains_keywords(target, [['电梯', '厕所', '洗手间', '卫生间']]):
             map_point(42)
@@ -718,7 +740,7 @@ def dialog() -> None:
     if audio:
         # Record the start time of audio processing
         start = time.time()
-        # Use a voice recognition model to transcribe audio. 如果是中文的语音识别结果，每个字都是带空格的。如果是英文的话是正常的
+        # Use a voice recognition model to transcribe audio.
         raw_prompt = paraformer(audio, hotword=hotword)[0]['text']
         # Record the end time of audio processing
         end = time.time()
@@ -775,7 +797,7 @@ def dialog() -> None:
         # Introduce "Shenhao"
         elif contains_keywords(raw_prompt, ['申昊', '介绍']):
             respond = True
-            with open(f'shenhao.txt', 'r', encoding='utf-8') as f:
+            with open('shenhao.txt', 'r', encoding='utf-8') as f:
                 shenhao = f.read()
             # add the introduction text to memory
             raw_prompt = '请根据申昊科技的简介' + shenhao + '回答以下问题:' + raw_prompt
@@ -840,10 +862,7 @@ def wake_callback(ros_msg) -> None:
             msg.append({'role': Role.ASSISTANT, 'content': intro})
             memory['messages'] = check_len(msg)
             # play introduction audio
-            files = os.listdir('position')
-            audio = [file for file in files if file.startswith(str(point)+'-') and file.endswith('.wav')]
-            for i in range(len(audio)):
-                subprocess.run(["aplay", "position/" + str(point) + '-' + str(i) + '.wav'])
+            subprocess.Popen(["aplay", "position/" + str(point) + '.wav'])
 
     if ros_msg.data == 3:
         # stop the dialog
